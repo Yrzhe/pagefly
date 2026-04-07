@@ -346,6 +346,12 @@ async def write_wiki_article(args):
     except Exception as e:
         logger.warning("Failed to regenerate wiki index: %s", e)
 
+    # Light integrity check
+    from src.shared.integrity import check_document
+    integrity = check_document(article_dir)
+    if not integrity.ok:
+        logger.warning("Integrity issues after write: %s", integrity.summary())
+
     # Activity log
     from src.shared.activity_log import append_log
     append_log("compile", f"{mode}: {title}", f"type={article_type}, refs={len(valid_refs)}")
@@ -550,6 +556,12 @@ async def create_knowledge_doc(args):
     )
     db.update_document(doc_id, status="classified", category=category, tags=json.dumps(tags, ensure_ascii=False))
     db.log_operation(doc_id, "ingest", to_path=str(doc_dir))
+
+    # Light integrity check
+    from src.shared.integrity import check_document
+    integrity = check_document(doc_dir)
+    if not integrity.ok:
+        logger.warning("Integrity issues after create: %s", integrity.summary())
 
     logger.info("Knowledge doc created: %s (%s)", title, category)
     return {"content": [{"type": "text", "text": f"Created: {doc_dir} (id={doc_id[:8]})"}]}
