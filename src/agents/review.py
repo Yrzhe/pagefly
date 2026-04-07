@@ -1,4 +1,4 @@
-"""Review Agent — generates daily/weekly/monthly knowledge reviews."""
+"""Review Agent — generates daily/weekly/monthly reviews and lint reports."""
 
 import asyncio
 
@@ -14,7 +14,7 @@ logger = get_logger("agents.review")
 
 async def run_review(review_type: str = "daily") -> str:
     """
-    Run a review agent for the given type (daily/weekly/monthly).
+    Run a review agent for the given type (daily/weekly/monthly/lint).
     Returns the review summary text.
     """
     init_db()
@@ -24,6 +24,10 @@ async def run_review(review_type: str = "daily") -> str:
         type_prompt = load_skill_prompt("review", review_type)
     except FileNotFoundError:
         type_prompt = f"Generate a {review_type} review of the knowledge base."
+
+    # For lint: prepend the automated integrity report
+    if review_type == "lint":
+        type_prompt = _build_lint_prompt(type_prompt)
 
     options = build_agent_options(
         skill_name="review",
@@ -43,10 +47,29 @@ async def run_review(review_type: str = "daily") -> str:
     response = "\n".join(response_parts) if response_parts else f"No {review_type} review generated."
 
     from src.shared.activity_log import append_log
-    append_log("review", f"{review_type} review", f"{len(response)} chars generated")
+    append_log("review" if review_type != "lint" else "lint", f"{review_type} review", f"{len(response)} chars generated")
 
     logger.info("%s review complete (%d chars)", review_type, len(response))
     return response
+
+
+def _build_lint_prompt(base_prompt: str) -> str:
+    """Build the lint prompt by prepending automated integrity results."""
+    from src.shared.integrity import full_integrity_check
+
+    logger.info("Running automated integrity check for lint...")
+    report = full_integrity_check()
+    integrity_section = report.to_markdown()
+
+    return (
+        f"## Automated Integrity Report\n\n"
+        f"{integrity_section}\n\n"
+        f"---\n\n"
+        f"Now perform the full lint analysis described below. "
+        f"Use the integrity report above as your starting point, "
+        f"then run the additional checks.\n\n"
+        f"{base_prompt}"
+    )
 
 
 def main():

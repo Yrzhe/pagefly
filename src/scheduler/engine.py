@@ -60,6 +60,19 @@ async def _run_review(review_type: str) -> None:
         await notify(f"{review_type.title()} review failed: {e}")
 
 
+async def _run_lint() -> None:
+    """Scheduled task: run wiki lint / health check."""
+    logger.info("Scheduled wiki lint starting...")
+    try:
+        from src.agents.review import run_review
+        result = await run_review("lint")
+        summary = result[:500] + "..." if len(result) > 500 else result
+        await notify(f"Wiki Lint Report\n\n{summary}")
+    except Exception as e:
+        logger.error("Wiki lint failed: %s", e)
+        await notify(f"Wiki lint failed: {e}")
+
+
 async def _run_chat_archive() -> None:
     """Scheduled task: archive daily chat logs."""
     logger.info("Archiving daily chat logs...")
@@ -218,6 +231,13 @@ async def start_scheduler() -> None:
         _run_chat_archive,
         trigger=CronTrigger(**_parse_cron(SCHEDULE_CHAT_ARCHIVE)),
         id="chat_archive", name="Chat Archive",
+    )
+
+    # Wiki lint (Sunday 3am)
+    scheduler.add_job(
+        _run_lint,
+        trigger=CronTrigger(day_of_week="sun", hour=3, minute=0),
+        id="wiki_lint", name="Wiki Lint",
     )
 
     # Workspace cleanup (daily at 3:30am)
