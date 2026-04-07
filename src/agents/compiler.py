@@ -25,13 +25,16 @@ async def run_compiler() -> None:
 
     prompt = (
         "Please compile the knowledge base. "
-        "Start by reading the wiki index (read_wiki_index) to see what's already compiled, "
-        "then list all documents in knowledge/ to find new uncompiled content. "
-        "Read the new documents, then generate summary articles, concept articles, "
-        "or connection analyses as appropriate. "
-        "For each article, provide a clear one-line summary (max 150 chars). "
-        "Write each compiled article to wiki/ using the write_wiki_article tool. "
-        "Focus on extracting key insights and identifying connections between documents."
+        "Start by reading the wiki index (read_wiki_index) to see what's already compiled. "
+        "Then list all documents in knowledge/ to find new uncompiled content. "
+        "Read the new documents and for each one: "
+        "1) Create a summary article (one per source doc). "
+        "2) Extract key concepts — if a concept page already exists in the index, "
+        "READ it and UPDATE it (pass update_id) with merged new information. "
+        "Only create a new concept page if nothing related exists. "
+        "3) Discover connections — same rule: update existing connection pages, don't duplicate. "
+        "When new info contradicts old data, mark it with ⚠️ 矛盾 inline. "
+        "For each article, provide a clear one-line summary (max 150 chars)."
     )
 
     from src.shared.activity_log import append_log

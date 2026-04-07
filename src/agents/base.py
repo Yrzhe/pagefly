@@ -169,21 +169,29 @@ def _validate_wiki_article(args: dict, known_ids: set[str]) -> list[str]:
 @tool(
     "write_wiki_article",
     (
-        "Write a compiled article to wiki/. Provide: article_type (summary|concept|connection|insight|qa), "
-        "title, content (markdown), summary (one-line description, max 150 chars), "
-        "source_doc_ids (list of source knowledge document IDs), "
-        "and references (list of {target_id, relation, confidence}). "
-        "Relation types: source (from knowledge), derived_from (from wiki), "
-        "related_concept, supports, contradicts. "
-        "All IDs in source_doc_ids and references.target_id are validated against existing documents. "
-        "Invalid references will be dropped with warnings."
+        "Write or UPDATE a wiki article. "
+        "To CREATE: provide article_type, title, content, summary, source_doc_ids, references. "
+        "To UPDATE an existing article: also provide update_id (the article's UUID). "
+        "When updating, the content REPLACES the old content — you must include the full merged content. "
+        "For concept and connection types, ALWAYS check if a related article exists first "
+        "(via read_wiki_index or list_wiki_articles) and UPDATE it rather than creating a duplicate. "
+        "Article types: summary (1:1 with source doc), concept (canonical, one per concept), "
+        "connection (one per relationship pair), insight, qa. "
+        "When updating with new info that contradicts old data, mark with: "
+        "> ⚠️ 矛盾：[old claim] vs [new claim (source, date)]"
     ),
-    {"article_type": str, "title": str, "content": str, "summary": str, "source_doc_ids": list, "references": list},
+    {
+        "article_type": str, "title": str, "content": str, "summary": str,
+        "source_doc_ids": list, "references": list, "update_id": str,
+    },
 )
 async def write_wiki_article(args):
-    """Write a compiled article to wiki/ with full validation."""
+    """Write or update a compiled article in wiki/ with full validation."""
     from src.ingest.metadata import generate_id, now_iso
     from src.storage import db
+
+    update_id = args.get("update_id", "")
+    is_update = bool(update_id)
 
     # Collect all known IDs for validation
     known_ids = _collect_all_doc_ids()
@@ -234,50 +242,102 @@ async def write_wiki_article(args):
         if src_id not in existing_targets:
             valid_refs.append({"target_id": src_id, "relation": "source", "confidence": 1.0})
 
-    article_id = generate_id()
     timestamp = now_iso()
 
-    # Create wiki article folder
-    sanitized_title = "".join(c for c in title if c not in r'\/:*?"<>|')[:60].strip()
-    folder_name = f"{sanitized_title}_{article_id[:8]}"
-    article_dir = WIKI_DIR / article_type / folder_name
+    if is_update:
+        # ── UPDATE existing article ──
+        article_dir = _find_doc_dir_by_id(update_id)
+        if article_dir is None:
+            return {"content": [{"type": "text", "text": f"Error: article not found for update: {update_id}"}]}
 
-    # Write document.md
-    md_path = article_dir / "document.md"
-    md_path.parent.mkdir(parents=True, exist_ok=True)
-    md_path.write_text(content, encoding="utf-8")
+        article_id = update_id
 
-    # Write metadata.json
-    metadata = {
-        "id": article_id,
-        "title": title,
-        "article_type": article_type,
-        "source_document_ids": valid_source_ids,
-        "references": valid_refs,
-        "created_at": timestamp,
-        "updated_at": timestamp,
-    }
+        # Update document.md
+        md_path = article_dir / "document.md"
+        md_path.write_text(content, encoding="utf-8")
 
-    # Validate JSON serialization before writing
-    try:
-        meta_json = json.dumps(metadata, ensure_ascii=False, indent=2)
-        json.loads(meta_json)  # round-trip check
-    except (TypeError, ValueError) as e:
-        logger.error("metadata.json serialization failed: %s", e)
-        return {"content": [{"type": "text", "text": f"Error: metadata JSON serialization failed: {e}"}]}
+        # Read existing metadata and merge
+        meta_path = article_dir / "metadata.json"
+        existing_meta = {}
+        if meta_path.exists():
+            existing_meta = json.loads(meta_path.read_text(encoding="utf-8"))
 
-    meta_path = article_dir / "metadata.json"
-    meta_path.write_text(meta_json, encoding="utf-8")
+        # Merge source_doc_ids (union of old + new)
+        old_sources = set(existing_meta.get("source_document_ids", []))
+        merged_sources = list(old_sources | set(valid_source_ids))
 
-    # Record in database
-    conn = db.get_connection()
-    conn.execute(
-        """INSERT INTO wiki_articles (id, title, article_type, file_path, summary, source_document_ids, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-        (article_id, title, article_type, str(article_dir), summary, json.dumps(valid_source_ids), timestamp, timestamp),
-    )
-    conn.commit()
-    conn.close()
+        # Merge references (keep existing + add new, deduplicate by target_id+relation)
+        old_refs = existing_meta.get("references", [])
+        ref_keys = {(r["target_id"], r["relation"]) for r in valid_refs}
+        for old_ref in old_refs:
+            key = (old_ref.get("target_id", ""), old_ref.get("relation", ""))
+            if key not in ref_keys:
+                valid_refs.append(old_ref)
+
+        metadata = {
+            **existing_meta,
+            "title": title,
+            "article_type": article_type,
+            "source_document_ids": merged_sources,
+            "references": valid_refs,
+            "updated_at": timestamp,
+        }
+        meta_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
+
+        # Update database
+        db.update_wiki_article(
+            article_id,
+            title=title,
+            summary=summary,
+            source_document_ids=json.dumps(merged_sources),
+        )
+
+        mode = "updated"
+    else:
+        # ── CREATE new article ──
+        article_id = generate_id()
+
+        sanitized_title = "".join(c for c in title if c not in r'\/:*?"<>|')[:60].strip()
+        folder_name = f"{sanitized_title}_{article_id[:8]}"
+        article_dir = WIKI_DIR / article_type / folder_name
+
+        # Write document.md
+        md_path = article_dir / "document.md"
+        md_path.parent.mkdir(parents=True, exist_ok=True)
+        md_path.write_text(content, encoding="utf-8")
+
+        # Write metadata.json
+        metadata = {
+            "id": article_id,
+            "title": title,
+            "article_type": article_type,
+            "source_document_ids": valid_source_ids,
+            "references": valid_refs,
+            "created_at": timestamp,
+            "updated_at": timestamp,
+        }
+
+        try:
+            meta_json = json.dumps(metadata, ensure_ascii=False, indent=2)
+            json.loads(meta_json)
+        except (TypeError, ValueError) as e:
+            logger.error("metadata.json serialization failed: %s", e)
+            return {"content": [{"type": "text", "text": f"Error: metadata JSON serialization failed: {e}"}]}
+
+        meta_path = article_dir / "metadata.json"
+        meta_path.write_text(meta_json, encoding="utf-8")
+
+        # Record in database
+        conn = db.get_connection()
+        conn.execute(
+            """INSERT INTO wiki_articles (id, title, article_type, file_path, summary, source_document_ids, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (article_id, title, article_type, str(article_dir), summary, json.dumps(valid_source_ids), timestamp, timestamp),
+        )
+        conn.commit()
+        conn.close()
+
+        mode = "created"
 
     # Regenerate wiki index
     from src.shared.indexer import generate_wiki_index
@@ -286,17 +346,21 @@ async def write_wiki_article(args):
     except Exception as e:
         logger.warning("Failed to regenerate wiki index: %s", e)
 
+    # Activity log
+    from src.shared.activity_log import append_log
+    append_log("compile", f"{mode}: {title}", f"type={article_type}, refs={len(valid_refs)}")
+
     warnings = []
     if dropped_sources:
         warnings.append(f"Dropped {len(dropped_sources)} invalid source IDs")
     if len(valid_refs) < len(references):
         warnings.append(f"Dropped {len(references) - len(valid_refs)} invalid references")
 
-    result_msg = f"Article written: {article_dir} (id={article_id[:8]}, refs={len(valid_refs)})"
+    result_msg = f"Article {mode}: {article_dir} (id={article_id[:8]}, refs={len(valid_refs)})"
     if warnings:
         result_msg += "\nWarnings: " + "; ".join(warnings)
 
-    logger.info("Wiki article written: %s (%s, refs=%d)", title, article_type, len(valid_refs))
+    logger.info("Wiki article %s: %s (%s, refs=%d)", mode, title, article_type, len(valid_refs))
     return {"content": [{"type": "text", "text": result_msg}]}
 
 
