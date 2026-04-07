@@ -1,0 +1,44 @@
+{
+  "categories": [
+    {
+      "id": "research",
+      "name": "研究",
+      "subcategories": ["半导体", "AI", "量化", "宏观经济"]
+    },
+    {
+      "id": "tech",
+      "name": "技术",
+      "subcategories": ["前端", "后端", "AI工程", "DevOps", "工具"]
+    },
+    {
+      "id": "finance",
+      "name": "财经",
+      "subcategories": ["A股", "美股", "加密货币", "投资策略"]
+    },
+    {
+      "id": "people",
+      "name": "人物",
+      "subcategories": []
+    },
+    {
+      "id": "projects",
+      "name": "项目",
+      "subcategories": []
+    },
+    {
+      "id": "ideas",
+      "name": "想法",
+      "subcategories": []
+    },
+    {
+      "id": "notes",
+      "name": "笔记",
+      "subcategories": []
+    },
+    {
+      "id": "misc",
+      "name": "未分类",
+      "subcategories": []
+    }
+  ]
+}

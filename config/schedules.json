@@ -1,0 +1,27 @@
+{
+  "scan_raw": {
+    "description": "扫描 raw/ 新文件并分类",
+    "interval_minutes": 30,
+    "enabled": true
+  },
+  "compile_wiki": {
+    "description": "编译 knowledge/ 到 wiki/",
+    "cron": "0 2 * * *",
+    "enabled": true
+  },
+  "daily_review": {
+    "description": "每日回顾",
+    "cron": "0 22 * * *",
+    "enabled": true
+  },
+  "weekly_review": {
+    "description": "每周回顾",
+    "cron": "0 22 * * 0",
+    "enabled": true
+  },
+  "monthly_review": {
+    "description": "每月回顾",
+    "cron": "0 22 1 * *",
+    "enabled": true
+  }
+}
