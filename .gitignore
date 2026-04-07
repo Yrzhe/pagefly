@@ -11,6 +11,7 @@ venv/
 
 # Environment
 .env
+config.json
 
 # Data (Docker Volume, not tracked)
 data/raw/*

@@ -1,4 +1,4 @@
-"""数据库连接和操作。"""
+"""Database connection and operations."""
 
 import sqlite3
 from datetime import datetime, timezone
@@ -52,7 +52,7 @@ CREATE TABLE IF NOT EXISTS wiki_articles (
 
 
 def get_connection() -> sqlite3.Connection:
-    """获取数据库连接。"""
+    """Get a database connection."""
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(DB_PATH))
     conn.row_factory = sqlite3.Row
@@ -62,7 +62,7 @@ def get_connection() -> sqlite3.Connection:
 
 
 def init_db() -> None:
-    """初始化数据库表。"""
+    """Initialize database tables."""
     conn = get_connection()
     conn.executescript(SCHEMA)
     conn.commit()
@@ -71,7 +71,7 @@ def init_db() -> None:
 
 
 def now_iso() -> str:
-    """当前时间 ISO 8601。"""
+    """Current time in ISO 8601."""
     return datetime.now(timezone.utc).astimezone().isoformat()
 
 
@@ -81,20 +81,21 @@ def insert_document(
     original_filename: str,
     current_path: str,
     ingested_at: str,
+    title: str = "",
 ) -> None:
-    """插入新文档记录。"""
+    """Insert a new document record."""
     conn = get_connection()
     conn.execute(
-        """INSERT INTO documents (id, source_type, original_filename, current_path, ingested_at)
-        VALUES (?, ?, ?, ?, ?)""",
-        (doc_id, source_type, original_filename, current_path, ingested_at),
+        """INSERT INTO documents (id, title, source_type, original_filename, current_path, ingested_at)
+        VALUES (?, ?, ?, ?, ?, ?)""",
+        (doc_id, title, source_type, original_filename, current_path, ingested_at),
     )
     conn.commit()
     conn.close()
 
 
 def update_document(doc_id: str, **fields) -> None:
-    """更新文档字段。"""
+    """Update document fields by ID."""
     if not fields:
         return
     set_clause = ", ".join(f"{k} = ?" for k in fields)
@@ -106,7 +107,7 @@ def update_document(doc_id: str, **fields) -> None:
 
 
 def get_document(doc_id: str) -> dict | None:
-    """查询单个文档。"""
+    """Get a single document by ID."""
     conn = get_connection()
     row = conn.execute("SELECT * FROM documents WHERE id = ?", (doc_id,)).fetchone()
     conn.close()
@@ -114,7 +115,7 @@ def get_document(doc_id: str) -> dict | None:
 
 
 def list_documents_by_status(status: str) -> list[dict]:
-    """按状态查询文档列表。"""
+    """List documents by status."""
     conn = get_connection()
     rows = conn.execute("SELECT * FROM documents WHERE status = ?", (status,)).fetchall()
     conn.close()
@@ -128,7 +129,7 @@ def log_operation(
     to_path: str = "",
     details_json: str = "{}",
 ) -> None:
-    """写入操作日志。"""
+    """Write an operation log entry."""
     conn = get_connection()
     conn.execute(
         """INSERT INTO operations_log (document_id, operation, from_path, to_path, details_json, created_at)

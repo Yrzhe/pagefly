@@ -1,0 +1,31 @@
+{
+  "api_keys": {
+    "anthropic": {
+      "api_key": "sk-ant-xxx",
+      "base_url": "https://api.anthropic.com"
+    },
+    "openai": {
+      "api_key": "sk-xxx",
+      "base_url": "https://api.openai.com/v1"
+    },
+    "mistral": {
+      "api_key": "xxx",
+      "base_url": "https://api.mistral.ai"
+    }
+  },
+  "telegram": {
+    "bot_token": "xxx",
+    "chat_id": "xxx"
+  },
+  "database": {
+    "url": "sqlite:///data/pagefly.db"
+  },
+  "models": {
+    "classifier": "claude-haiku-4-5",
+    "agent": "claude-opus-4-6"
+  },
+  "app": {
+    "log_level": "INFO",
+    "scan_interval_minutes": 30
+  }
+}

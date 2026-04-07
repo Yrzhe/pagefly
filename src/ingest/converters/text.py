@@ -1,4 +1,4 @@
-"""文本/Markdown 直传 converter。"""
+"""Text/Markdown pass-through converter."""
 
 from pathlib import Path
 
@@ -6,7 +6,7 @@ from src.shared.types import ConvertResult, IngestInput
 
 
 def can_handle(input_data: IngestInput) -> bool:
-    """判断是否能处理此输入。"""
+    """Check if this converter can handle the input."""
     if input_data.type == "text" and input_data.text:
         return True
     if input_data.type == "file" and input_data.file_path:
@@ -16,7 +16,7 @@ def can_handle(input_data: IngestInput) -> bool:
 
 
 def convert(input_data: IngestInput) -> ConvertResult:
-    """转换为 Markdown — 文本类型直传，不需要转换。"""
+    """Convert to markdown — text types pass through directly."""
     if input_data.type == "text":
         markdown = input_data.text
     else:
@@ -28,7 +28,7 @@ def convert(input_data: IngestInput) -> ConvertResult:
 
 
 def _extract_title(markdown: str, filename: str) -> str:
-    """尝试从 Markdown 内容提取标题，否则用文件名。"""
+    """Extract title from first H1, fallback to filename."""
     for line in markdown.split("\n"):
         stripped = line.strip()
         if stripped.startswith("# ") and not stripped.startswith("##"):

@@ -1,10 +1,10 @@
-"""分类器 — 单次 Claude API 调用 + 结构化输出。"""
+"""Classifier — single Claude API call with structured output."""
 
 import json
 
 import anthropic
 
-from src.shared.config import ANTHROPIC_API_KEY, CLASSIFIER_MODEL, load_categories, load_prompt
+from src.shared.config import ANTHROPIC_API_KEY, ANTHROPIC_BASE_URL, CLASSIFIER_MODEL, load_categories, load_prompt
 from src.shared.logger import get_logger
 from src.shared.types import ClassificationResult
 
@@ -30,19 +30,19 @@ CLASSIFICATION_SCHEMA = {
 
 def classify(content: str, max_chars: int = 2000) -> ClassificationResult:
     """
-    对文档内容进行分类。
-    - 从 categories.json 加载分类列表
-    - 从 prompts/classifier.md 加载提示词
-    - 调用 Claude API 获取结构化分类结果
-    - 校验返回的 category 是否在列表中
-    - 不在则重试（最多 3 次）
+    Classify document content.
+    - Load categories from categories.json
+    - Load prompt from prompts/classifier.md
+    - Call Claude API with structured output
+    - Validate returned category is in the list
+    - Retry up to 3 times if category is invalid
     """
     categories_data = load_categories()
     system_prompt = load_prompt("classifier")
     categories_json = json.dumps(categories_data, ensure_ascii=False, indent=2)
     content_excerpt = content[:max_chars]
 
-    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY, base_url=ANTHROPIC_BASE_URL)
     valid_ids = {c["id"] for c in categories_data["categories"]}
 
     for attempt in range(1, MAX_RETRIES + 1):
@@ -52,7 +52,7 @@ def classify(content: str, max_chars: int = 2000) -> ClassificationResult:
             system=system_prompt,
             messages=[{
                 "role": "user",
-                "content": f"分类列表：\n{categories_json}\n\n文档内容：\n{content_excerpt}",
+                "content": f"Categories:\n{categories_json}\n\nDocument content:\n{content_excerpt}",
             }],
             output_config={
                 "format": {

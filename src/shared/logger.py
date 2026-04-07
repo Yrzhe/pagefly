@@ -1,4 +1,4 @@
-"""日志模块。"""
+"""Logging setup."""
 
 import logging
 import sys
@@ -7,7 +7,7 @@ from src.shared.config import LOG_LEVEL
 
 
 def get_logger(name: str) -> logging.Logger:
-    """获取指定名称的 logger。"""
+    """Get a named logger with standard formatting."""
     logger = logging.getLogger(f"pagefly.{name}")
     if not logger.handlers:
         handler = logging.StreamHandler(sys.stdout)

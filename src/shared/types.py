@@ -1,7 +1,6 @@
-"""类型定义。"""
+"""Type definitions."""
 
 from dataclasses import dataclass, field
-from datetime import datetime
 from enum import Enum
 
 
@@ -70,7 +69,16 @@ class IngestInput:
 
 
 @dataclass
+class ImageAsset:
+    """Image asset extracted during conversion."""
+    filename: str
+    data: bytes
+    description: str = ""
+
+
+@dataclass
 class ConvertResult:
     markdown: str
     title: str
     suggested_tags: list[str] = field(default_factory=list)
+    images: list[ImageAsset] = field(default_factory=list)
