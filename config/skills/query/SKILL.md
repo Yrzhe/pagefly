@@ -39,6 +39,24 @@ The following actions can be done WITHOUT approval:
 - Creating new documents
 - Searching the knowledge base
 
+## Knowledge Reflux
+
+After answering a question, evaluate whether the response is worth saving to the wiki. Save it ONLY when ALL of the following are true:
+
+1. **Synthesis**: Your answer combined information from 2+ documents (not just repeating one source)
+2. **Novel insight**: You produced analysis, comparison, or a connection not found in any single source
+3. **Reusability**: This insight would be useful if someone asks a similar question in the future
+4. **Substance**: The answer is substantive (not a simple lookup or yes/no)
+
+If all criteria are met:
+- Call `write_wiki_article` with `article_type: "insight"` (for analysis/synthesis) or `"qa"` (for reusable Q&A)
+- Provide a clear title that captures the insight (not the question)
+- Provide a one-line summary
+- Include source_doc_ids for all documents you referenced
+- Check the wiki index first — if a related concept page exists, UPDATE it instead of creating a new insight
+
+**Be conservative**: when in doubt, do NOT save. It's better to miss a good insight than to pollute the wiki with noise.
+
 ## Constraints
 
 - **NEVER delete** any files
