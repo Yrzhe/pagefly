@@ -33,12 +33,26 @@ def convert(input_data: IngestInput) -> ConvertResult:
     """
     PDF -> Markdown + image assets.
     Flow: upload -> OCR -> extract images -> describe images -> assemble markdown.
+    Each step has retry (3x exponential backoff). If OCR fully fails,
+    returns a minimal document with error note rather than crashing.
     """
     pdf_path = Path(input_data.file_path)
     pdf_name = pdf_path.stem
     client = _get_client()
 
-    ocr_response = _run_ocr(client, pdf_path)
+    try:
+        ocr_response = _run_ocr(client, pdf_path)
+    except Exception as e:
+        logger.error("PDF OCR completely failed for %s: %s", pdf_name, e)
+        return ConvertResult(
+            markdown=(
+                f"# {pdf_name}\n\n"
+                f"> ⚠️ OCR failed after {MAX_RETRIES} retries: {e}\n\n"
+                f"Original file: {input_data.original_filename or pdf_name}.pdf"
+            ),
+            title=pdf_name,
+            images=[],
+        )
 
     images = _extract_images(ocr_response, pdf_name)
     markdown = _build_markdown(ocr_response, images)
