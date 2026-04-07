@@ -3,6 +3,7 @@
 import re
 from pathlib import Path
 
+from src.ingest.converters import image as image_converter
 from src.ingest.converters import pdf as pdf_converter
 from src.ingest.converters import text as text_converter
 from src.ingest.metadata import build_metadata, write_metadata
@@ -17,8 +18,8 @@ logger = get_logger("ingest.pipeline")
 # Register all converters (add a line here for new formats)
 CONVERTERS = [
     pdf_converter,
+    image_converter,
     text_converter,
-    # image_converter,
     # voice_converter,
     # docx_converter,
     # url_converter,
