@@ -38,6 +38,11 @@
   "notifications": {
     "telegram": true
   },
+  "api": {
+    "port": 8000,
+    "master_token": "your-master-token-change-this",
+    "max_upload_mb": 50
+  },
   "app": {
     "log_level": "INFO"
   }

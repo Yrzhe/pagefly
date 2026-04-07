@@ -60,6 +60,14 @@ CREATE TABLE IF NOT EXISTS scheduled_tasks (
     updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS api_tokens (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    token TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL,
+    last_used_at TEXT DEFAULT ''
+);
+
 CREATE TABLE IF NOT EXISTS custom_prompts (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL UNIQUE,
@@ -249,5 +257,51 @@ def delete_custom_prompt(name: str) -> None:
     """Delete a custom prompt by name."""
     conn = get_connection()
     conn.execute("DELETE FROM custom_prompts WHERE name = ?", (name,))
+    conn.commit()
+    conn.close()
+
+
+# ── API Tokens ──
+
+def insert_api_token(token_id: str, name: str, token: str) -> None:
+    """Insert a new API token."""
+    conn = get_connection()
+    conn.execute(
+        "INSERT INTO api_tokens (id, name, token, created_at) VALUES (?, ?, ?, ?)",
+        (token_id, name, token, now_iso()),
+    )
+    conn.commit()
+    conn.close()
+
+
+def validate_api_token(token: str) -> bool:
+    """Check if a token exists. Updates last_used_at."""
+    conn = get_connection()
+    row = conn.execute("SELECT id FROM api_tokens WHERE token = ?", (token,)).fetchone()
+    if row:
+        conn.execute("UPDATE api_tokens SET last_used_at = ? WHERE token = ?", (now_iso(), token))
+        conn.commit()
+    conn.close()
+    return row is not None
+
+
+def list_api_tokens() -> list[dict]:
+    """List all API tokens (token value masked)."""
+    conn = get_connection()
+    rows = conn.execute("SELECT id, name, token, created_at, last_used_at FROM api_tokens").fetchall()
+    conn.close()
+    result = []
+    for r in rows:
+        d = dict(r)
+        # Mask token: show first 8 chars only
+        d["token"] = d["token"][:8] + "..." if len(d["token"]) > 8 else d["token"]
+        result.append(d)
+    return result
+
+
+def delete_api_token(token_id: str) -> None:
+    """Delete an API token by ID."""
+    conn = get_connection()
+    conn.execute("DELETE FROM api_tokens WHERE id = ?", (token_id,))
     conn.commit()
     conn.close()

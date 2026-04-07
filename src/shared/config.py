@@ -66,6 +66,12 @@ SCHEDULE_CHAT_ARCHIVE: str = _scheduler.get("chat_archive", "55 23 * * *")
 _notifications = _cfg.get("notifications", {})
 NOTIFY_TELEGRAM: bool = _notifications.get("telegram", False)
 
+# API
+_api = _cfg.get("api", {})
+API_PORT: int = _api.get("port", 8000)
+API_MASTER_TOKEN: str = _api.get("master_token", "")
+API_MAX_UPLOAD_MB: int = _api.get("max_upload_mb", 50)
+
 # App
 LOG_LEVEL: str = _cfg["app"]["log_level"]
 
