@@ -826,6 +826,111 @@ async def list_prompts(args):
     return {"content": [{"type": "text", "text": json.dumps(result, ensure_ascii=False, indent=2)}]}
 
 
+# ── Workspace tools ──
+
+from src.shared.config import WORKSPACE_DIR
+
+
+@tool(
+    "write_workspace_file",
+    (
+        "Write a file to the agent workspace (data/workspace/). "
+        "Use for drafts, scripts, intermediate work, or scratch content. "
+        "Workspace files are NOT tracked in DB, NOT indexed, NOT compiled. "
+        "Provide: path (relative to workspace/, e.g. 'drafts/my_analysis.md'), content."
+    ),
+    {"path": str, "content": str},
+)
+async def write_workspace_file(args):
+    """Write a file to the workspace scratch area."""
+    rel_path = args["path"]
+    content = args["content"]
+
+    # Security: prevent path traversal
+    if ".." in rel_path:
+        return {"content": [{"type": "text", "text": "Error: path must not contain '..'"}]}
+
+    file_path = WORKSPACE_DIR / rel_path
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    file_path.write_text(content, encoding="utf-8")
+
+    logger.info("Workspace file written: %s (%d chars)", rel_path, len(content))
+    return {"content": [{"type": "text", "text": f"Written: workspace/{rel_path} ({len(content)} chars)"}]}
+
+
+@tool(
+    "list_workspace_files",
+    "List all files in the agent workspace (data/workspace/). Shows path, size, and age.",
+    {},
+)
+async def list_workspace_files(args):
+    """List workspace contents."""
+    from datetime import datetime, timezone
+
+    if not WORKSPACE_DIR.exists():
+        return {"content": [{"type": "text", "text": "Workspace is empty."}]}
+
+    now = datetime.now(timezone.utc).astimezone()
+    files = []
+    for file_path in sorted(WORKSPACE_DIR.rglob("*")):
+        if file_path.is_dir():
+            continue
+        rel = file_path.relative_to(WORKSPACE_DIR)
+        stat = file_path.stat()
+        size_kb = stat.st_size / 1024
+        mtime = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).astimezone()
+        age_days = (now - mtime).days
+
+        files.append({
+            "path": str(rel),
+            "size": f"{size_kb:.1f}KB",
+            "age_days": age_days,
+        })
+
+    if not files:
+        return {"content": [{"type": "text", "text": "Workspace is empty."}]}
+
+    return {"content": [{"type": "text", "text": json.dumps(files, ensure_ascii=False, indent=2)}]}
+
+
+@tool(
+    "promote_draft_to_wiki",
+    (
+        "Promote a workspace draft to a wiki article. "
+        "Reads the file from workspace, then writes it as a proper wiki article "
+        "with full validation, DB tracking, and index update. "
+        "Provide: workspace_path (relative to workspace/), article_type, title, summary, source_doc_ids, references. "
+        "The workspace file is kept after promotion (not deleted)."
+    ),
+    {
+        "workspace_path": str, "article_type": str, "title": str,
+        "summary": str, "source_doc_ids": list, "references": list,
+    },
+)
+async def promote_draft_to_wiki(args):
+    """Promote a workspace draft to a full wiki article."""
+    ws_path = WORKSPACE_DIR / args["workspace_path"]
+    if not ws_path.exists():
+        return {"content": [{"type": "text", "text": f"Error: file not found: workspace/{args['workspace_path']}"}]}
+
+    content = ws_path.read_text(encoding="utf-8")
+
+    # Delegate to write_wiki_article by building the args
+    wiki_args = {
+        "article_type": args["article_type"],
+        "title": args["title"],
+        "content": content,
+        "summary": args.get("summary", ""),
+        "source_doc_ids": args.get("source_doc_ids", []),
+        "references": args.get("references", []),
+    }
+
+    result = await write_wiki_article(wiki_args)
+
+    logger.info("Draft promoted: workspace/%s → wiki", args["workspace_path"])
+    return result
+
+
 def build_knowledge_tools_server():
     """Create MCP server with all knowledge/wiki tools."""
     return create_sdk_mcp_server(
@@ -849,6 +954,9 @@ def build_knowledge_tools_server():
             delete_schedule,
             save_prompt,
             list_prompts,
+            write_workspace_file,
+            list_workspace_files,
+            promote_draft_to_wiki,
         ],
     )
 
@@ -889,6 +997,9 @@ def build_agent_options(
             "mcp__pagefly__delete_schedule",
             "mcp__pagefly__save_prompt",
             "mcp__pagefly__list_prompts",
+            "mcp__pagefly__write_workspace_file",
+            "mcp__pagefly__list_workspace_files",
+            "mcp__pagefly__promote_draft_to_wiki",
         ],
         permission_mode="bypassPermissions",
         max_turns=max_turns,

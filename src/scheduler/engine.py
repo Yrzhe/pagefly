@@ -84,6 +84,34 @@ async def _run_organize() -> None:
         logger.error("Organize failed: %s", e)
 
 
+async def _cleanup_workspace() -> None:
+    """Remove workspace files older than 7 days."""
+    from src.shared.config import WORKSPACE_DIR
+
+    if not WORKSPACE_DIR.exists():
+        return
+
+    now = datetime.now(timezone.utc).astimezone()
+    removed = 0
+    for file_path in list(WORKSPACE_DIR.rglob("*")):
+        if file_path.is_dir():
+            continue
+        mtime = datetime.fromtimestamp(file_path.stat().st_mtime, tz=timezone.utc).astimezone()
+        age_days = (now - mtime).days
+        if age_days >= 7:
+            file_path.unlink()
+            removed += 1
+            logger.info("Workspace cleanup: removed %s (age=%dd)", file_path.name, age_days)
+
+    # Remove empty directories
+    for dir_path in sorted(WORKSPACE_DIR.rglob("*"), reverse=True):
+        if dir_path.is_dir() and not any(dir_path.iterdir()):
+            dir_path.rmdir()
+
+    if removed:
+        logger.info("Workspace cleanup: removed %d files", removed)
+
+
 async def _run_custom_task(task_name: str, task_type: str, prompt: str) -> None:
     """Run a user-defined scheduled task."""
     logger.info("Running custom task: %s (%s)", task_name, task_type)
@@ -190,6 +218,13 @@ async def start_scheduler() -> None:
         _run_chat_archive,
         trigger=CronTrigger(**_parse_cron(SCHEDULE_CHAT_ARCHIVE)),
         id="chat_archive", name="Chat Archive",
+    )
+
+    # Workspace cleanup (daily at 3:30am)
+    scheduler.add_job(
+        _cleanup_workspace,
+        trigger=CronTrigger(hour=3, minute=30),
+        id="workspace_cleanup", name="Workspace Cleanup",
     )
 
     # Load user-defined tasks from database

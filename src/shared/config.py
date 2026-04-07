@@ -14,6 +14,7 @@ RAW_DIR = DATA_DIR / "raw"
 KNOWLEDGE_DIR = DATA_DIR / "knowledge"
 WIKI_DIR = DATA_DIR / "wiki"
 INBOX_DIR = DATA_DIR / "inbox"
+WORKSPACE_DIR = DATA_DIR / "workspace"
 
 
 def _load_config() -> dict:
