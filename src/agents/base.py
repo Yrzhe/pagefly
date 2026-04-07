@@ -961,6 +961,15 @@ def build_knowledge_tools_server():
     )
 
 
+def _load_schema() -> str:
+    """Load SCHEMA.md if it exists."""
+    from src.shared.config import CONFIG_DIR
+    schema_path = CONFIG_DIR / "SCHEMA.md"
+    if schema_path.exists():
+        return schema_path.read_text(encoding="utf-8")
+    return ""
+
+
 def build_agent_options(
     skill_name: str,
     extra_system: str = "",
@@ -970,6 +979,12 @@ def build_agent_options(
     setup_env()
 
     system_prompt = load_skill_prompt(skill_name)
+
+    # Inject schema as shared context for all agents
+    schema = _load_schema()
+    if schema:
+        system_prompt = f"{system_prompt}\n\n---\n\n{schema}"
+
     if extra_system:
         system_prompt = f"{system_prompt}\n\n{extra_system}"
 
