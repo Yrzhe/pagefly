@@ -84,6 +84,81 @@ async def _run_organize() -> None:
         logger.error("Organize failed: %s", e)
 
 
+async def _run_custom_task(task_name: str, task_type: str, prompt: str) -> None:
+    """Run a user-defined scheduled task."""
+    logger.info("Running custom task: %s (%s)", task_name, task_type)
+    try:
+        if task_type == "review":
+            from src.agents.review import run_review
+            result = await run_review("daily")
+            summary = result[:500] + "..." if len(result) > 500 else result
+            await notify(f"Custom Review: {task_name}\n\n{summary}")
+        elif task_type == "compiler":
+            from src.agents.compiler import run_compiler
+            await run_compiler()
+            await notify(f"Custom Compiler: {task_name} finished.")
+        elif task_type == "custom":
+            # Run as a generic agent query with the custom prompt
+            from src.agents.query import ask
+            result = await ask(prompt)
+            summary = result[:500] + "..." if len(result) > 500 else result
+            await notify(f"Task: {task_name}\n\n{summary}")
+        else:
+            logger.warning("Unknown task type: %s", task_type)
+    except Exception as e:
+        logger.error("Custom task %s failed: %s", task_name, e)
+        await notify(f"Task '{task_name}' failed: {e}")
+
+
+def _load_user_tasks(scheduler: AsyncIOScheduler) -> None:
+    """Load user-defined scheduled tasks from database."""
+    from src.storage import db
+    tasks = db.list_scheduled_tasks(enabled_only=True)
+
+    for task in tasks:
+        job_id = f"user_{task['id'][:8]}"
+        try:
+            scheduler.add_job(
+                _run_custom_task,
+                args=[task["name"], task["task_type"], task["prompt"]],
+                trigger=CronTrigger(**_parse_cron(task["cron_expr"])),
+                id=job_id,
+                name=f"[User] {task['name']}",
+                replace_existing=True,
+            )
+            logger.info("Loaded user task: %s (%s)", task["name"], task["cron_expr"])
+        except Exception as e:
+            logger.error("Failed to load task %s: %s", task["name"], e)
+
+
+def _reload_user_tasks(scheduler: AsyncIOScheduler) -> None:
+    """Reload user tasks — add new, update changed, remove deleted."""
+    from src.storage import db
+    tasks = db.list_scheduled_tasks(enabled_only=True)
+    db_job_ids = {f"user_{t['id'][:8]}" for t in tasks}
+
+    # Remove jobs that are no longer in DB
+    for job in scheduler.get_jobs():
+        if job.id.startswith("user_") and job.id not in db_job_ids:
+            scheduler.remove_job(job.id)
+            logger.info("Removed stale job: %s", job.name)
+
+    # Add/update jobs from DB
+    for task in tasks:
+        job_id = f"user_{task['id'][:8]}"
+        try:
+            scheduler.add_job(
+                _run_custom_task,
+                args=[task["name"], task["task_type"], task["prompt"]],
+                trigger=CronTrigger(**_parse_cron(task["cron_expr"])),
+                id=job_id,
+                name=f"[User] {task['name']}",
+                replace_existing=True,
+            )
+        except Exception as e:
+            logger.error("Failed to reload task %s: %s", task["name"], e)
+
+
 async def start_scheduler() -> None:
     """Start the unified scheduler with all configured jobs."""
     init_db()
@@ -117,12 +192,22 @@ async def start_scheduler() -> None:
         id="chat_archive", name="Chat Archive",
     )
 
+    # Load user-defined tasks from database
+    _load_user_tasks(scheduler)
+
     scheduler.start()
 
     jobs = scheduler.get_jobs()
     for job in jobs:
         logger.info("Scheduled: %s (next run: %s)", job.name, job.next_run_time)
 
-    # Start inbox watcher alongside scheduler
-    logger.info("Scheduler started with %d jobs + inbox watcher", len(jobs))
+    # Periodically reload user tasks (checks for new/updated/deleted tasks)
+    async def _reload_loop():
+        while True:
+            await asyncio.sleep(60)
+            _reload_user_tasks(scheduler)
+
+    reload_task = asyncio.create_task(_reload_loop())
+
+    logger.info("Scheduler started with %d jobs + inbox watcher + live reload", len(jobs))
     await watch_inbox()

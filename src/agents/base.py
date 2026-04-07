@@ -518,6 +518,186 @@ async def send_document_as_pdf(args):
         return {"content": [{"type": "text", "text": f"Error creating PDF: {e}"}]}
 
 
+@tool(
+    "add_schedule",
+    (
+        "Add a new scheduled task. Provide: name (human-readable), cron_expr (cron format), "
+        "task_type (review|compiler|custom), prompt (what the task should do). "
+        "Example cron: '0 9 * * *' = every day at 9am, '0 9 * * 1' = every Monday at 9am."
+    ),
+    {"name": str, "cron_expr": str, "task_type": str, "prompt": str},
+)
+async def add_schedule(args):
+    """Add a new scheduled task to the database."""
+    from src.ingest.metadata import generate_id
+    from src.storage import db
+
+    task_id = generate_id()
+    name = args["name"]
+    cron_expr = args["cron_expr"]
+    task_type = args.get("task_type", "custom")
+    prompt = args.get("prompt", "")
+
+    # Validate cron expression
+    parts = cron_expr.strip().split()
+    if len(parts) != 5:
+        return {"content": [{"type": "text", "text": f"Error: invalid cron expression '{cron_expr}'. Must have 5 fields."}]}
+
+    db.insert_scheduled_task(task_id, name, cron_expr, task_type, prompt)
+    logger.info("Schedule added: %s (%s) -> %s", name, cron_expr, task_type)
+
+    return {"content": [{"type": "text", "text": f"Schedule added: {name} (id={task_id[:8]}, cron={cron_expr})"}]}
+
+
+@tool(
+    "list_schedules",
+    "List all scheduled tasks (both system defaults and user-defined).",
+    {},
+)
+async def list_schedules(args):
+    """List all scheduled tasks."""
+    from src.storage import db
+    from src.shared.config import (
+        SCHEDULE_DAILY_REVIEW, SCHEDULE_WEEKLY_REVIEW,
+        SCHEDULE_MONTHLY_REVIEW, SCHEDULE_COMPILER,
+    )
+
+    # System defaults
+    system = [
+        {"name": "Daily Review", "cron": SCHEDULE_DAILY_REVIEW, "type": "review", "source": "system"},
+        {"name": "Weekly Review", "cron": SCHEDULE_WEEKLY_REVIEW, "type": "review", "source": "system"},
+        {"name": "Monthly Review", "cron": SCHEDULE_MONTHLY_REVIEW, "type": "review", "source": "system"},
+        {"name": "Compiler", "cron": SCHEDULE_COMPILER, "type": "compiler", "source": "system"},
+    ]
+
+    # User-defined
+    user_tasks = db.list_scheduled_tasks()
+    user = [
+        {
+            "id": t["id"][:8],
+            "name": t["name"],
+            "cron": t["cron_expr"],
+            "type": t["task_type"],
+            "enabled": bool(t["enabled"]),
+            "prompt": t["prompt"][:100] + "..." if len(t["prompt"]) > 100 else t["prompt"],
+            "source": "user",
+        }
+        for t in user_tasks
+    ]
+
+    all_tasks = system + user
+    return {"content": [{"type": "text", "text": json.dumps(all_tasks, ensure_ascii=False, indent=2)}]}
+
+
+@tool(
+    "update_schedule",
+    "Update a user-defined scheduled task. Provide task_id and fields to update (name, cron_expr, prompt, enabled).",
+    {"task_id": str, "updates": dict},
+)
+async def update_schedule(args):
+    """Update a scheduled task."""
+    from src.storage import db
+
+    task_id = args["task_id"]
+    updates = args.get("updates", {})
+
+    # Find full ID
+    tasks = db.list_scheduled_tasks()
+    full_id = None
+    for t in tasks:
+        if t["id"].startswith(task_id):
+            full_id = t["id"]
+            break
+
+    if not full_id:
+        return {"content": [{"type": "text", "text": f"Error: task not found: {task_id}"}]}
+
+    allowed = {"name", "cron_expr", "prompt", "enabled", "task_type"}
+    filtered = {k: v for k, v in updates.items() if k in allowed}
+
+    if not filtered:
+        return {"content": [{"type": "text", "text": "Error: no valid fields to update"}]}
+
+    db.update_scheduled_task(full_id, **filtered)
+    logger.info("Schedule updated: %s -> %s", task_id, filtered)
+
+    return {"content": [{"type": "text", "text": f"Schedule updated: {task_id}"}]}
+
+
+@tool(
+    "delete_schedule",
+    "Delete a user-defined scheduled task by its ID.",
+    {"task_id": str},
+)
+async def delete_schedule(args):
+    """Delete a scheduled task."""
+    from src.storage import db
+
+    task_id = args["task_id"]
+    tasks = db.list_scheduled_tasks()
+    full_id = None
+    for t in tasks:
+        if t["id"].startswith(task_id):
+            full_id = t["id"]
+            break
+
+    if not full_id:
+        return {"content": [{"type": "text", "text": f"Error: task not found: {task_id}"}]}
+
+    db.delete_scheduled_task(full_id)
+    logger.info("Schedule deleted: %s", task_id)
+
+    return {"content": [{"type": "text", "text": f"Schedule deleted: {task_id}"}]}
+
+
+@tool(
+    "save_prompt",
+    "Save or update a custom prompt. Provide: name (unique key), content (the prompt text), category (general|review|compiler|query).",
+    {"name": str, "content": str, "category": str},
+)
+async def save_prompt(args):
+    """Save or update a custom prompt in the database."""
+    from src.ingest.metadata import generate_id
+    from src.storage import db
+
+    name = args["name"]
+    content = args["content"]
+    category = args.get("category", "general")
+
+    prompt_id = generate_id()
+    db.upsert_custom_prompt(prompt_id, name, content, category)
+    logger.info("Prompt saved: %s (%s)", name, category)
+
+    return {"content": [{"type": "text", "text": f"Prompt saved: {name} (category={category})"}]}
+
+
+@tool(
+    "list_prompts",
+    "List all custom prompts, optionally filtered by category.",
+    {"category": str},
+)
+async def list_prompts(args):
+    """List custom prompts."""
+    from src.storage import db
+
+    category = args.get("category")
+    if category == "all" or not category:
+        category = None
+
+    prompts = db.list_custom_prompts(category)
+    result = [
+        {
+            "name": p["name"],
+            "category": p["category"],
+            "preview": p["content"][:100] + "..." if len(p["content"]) > 100 else p["content"],
+            "updated_at": p["updated_at"],
+        }
+        for p in prompts
+    ]
+
+    return {"content": [{"type": "text", "text": json.dumps(result, ensure_ascii=False, indent=2)}]}
+
+
 def build_knowledge_tools_server():
     """Create MCP server with all knowledge/wiki tools."""
     return create_sdk_mcp_server(
@@ -533,6 +713,12 @@ def build_knowledge_tools_server():
             create_knowledge_doc,
             send_document_as_zip,
             send_document_as_pdf,
+            add_schedule,
+            list_schedules,
+            update_schedule,
+            delete_schedule,
+            save_prompt,
+            list_prompts,
         ],
     )
 
@@ -565,6 +751,12 @@ def build_agent_options(
             "mcp__pagefly__create_knowledge_doc",
             "mcp__pagefly__send_document_as_zip",
             "mcp__pagefly__send_document_as_pdf",
+            "mcp__pagefly__add_schedule",
+            "mcp__pagefly__list_schedules",
+            "mcp__pagefly__update_schedule",
+            "mcp__pagefly__delete_schedule",
+            "mcp__pagefly__save_prompt",
+            "mcp__pagefly__list_prompts",
         ],
         permission_mode="bypassPermissions",
         max_turns=max_turns,
