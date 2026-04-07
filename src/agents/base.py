@@ -121,6 +121,23 @@ def _collect_all_doc_ids() -> set[str]:
 
 
 VALID_ARTICLE_TYPES = {"summary", "concept", "connection", "insight", "qa", "lint"}
+
+
+def _build_frontmatter(title: str, article_type: str, summary: str, source_titles: list[str], timestamp: str) -> str:
+    """Build YAML frontmatter for Obsidian compatibility."""
+    date = timestamp[:10] if timestamp else ""
+    sources_yaml = ", ".join(source_titles[:10]) if source_titles else ""
+    lines = [
+        "---",
+        f"title: \"{title}\"",
+        f"type: {article_type}",
+        f"summary: \"{summary}\"",
+    ]
+    if sources_yaml:
+        lines.append(f"sources: [{sources_yaml}]")
+    lines.append(f"date: {date}")
+    lines.append("---")
+    return "\n".join(lines)
 VALID_RELATIONS = {"source", "derived_from", "related_concept", "supports", "contradicts"}
 
 
@@ -252,9 +269,13 @@ async def write_wiki_article(args):
 
         article_id = update_id
 
-        # Update document.md
+        # Collect source titles for frontmatter
+        source_titles = _collect_source_titles(valid_source_ids)
+
+        # Update document.md with frontmatter
         md_path = article_dir / "document.md"
-        md_path.write_text(content, encoding="utf-8")
+        frontmatter = _build_frontmatter(title, article_type, summary, source_titles, timestamp)
+        md_path.write_text(f"{frontmatter}\n\n{content}", encoding="utf-8")
 
         # Read existing metadata and merge
         meta_path = article_dir / "metadata.json"
@@ -301,10 +322,14 @@ async def write_wiki_article(args):
         folder_name = f"{sanitized_title}_{article_id[:8]}"
         article_dir = WIKI_DIR / article_type / folder_name
 
-        # Write document.md
+        # Collect source titles for frontmatter
+        source_titles = _collect_source_titles(valid_source_ids)
+
+        # Write document.md with frontmatter
         md_path = article_dir / "document.md"
         md_path.parent.mkdir(parents=True, exist_ok=True)
-        md_path.write_text(content, encoding="utf-8")
+        frontmatter = _build_frontmatter(title, article_type, summary, source_titles, timestamp)
+        md_path.write_text(f"{frontmatter}\n\n{content}", encoding="utf-8")
 
         # Write metadata.json
         metadata = {
@@ -565,6 +590,25 @@ async def create_knowledge_doc(args):
 
     logger.info("Knowledge doc created: %s (%s)", title, category)
     return {"content": [{"type": "text", "text": f"Created: {doc_dir} (id={doc_id[:8]})"}]}
+
+
+def _collect_source_titles(source_ids: list[str]) -> list[str]:
+    """Collect titles for source document IDs (for frontmatter)."""
+    titles = []
+    for doc_id in source_ids:
+        doc_dir = _find_doc_dir_by_id(doc_id)
+        if doc_dir is None:
+            continue
+        meta_path = doc_dir / "metadata.json"
+        if meta_path.exists():
+            try:
+                meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                title = meta.get("title", "")
+                if title:
+                    titles.append(title)
+            except Exception:
+                pass
+    return titles
 
 
 def _find_doc_dir_by_id(doc_id: str) -> Path | None:
