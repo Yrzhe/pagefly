@@ -21,11 +21,24 @@
     "url": "sqlite:///data/pagefly.db"
   },
   "models": {
-    "classifier": "claude-haiku-4-5",
-    "agent": "claude-opus-4-6"
+    "classifier": "claude-sonnet-4-6",
+    "agent": "claude-sonnet-4-6"
+  },
+  "watcher": {
+    "inbox_dir": "data/inbox",
+    "parallel_limit": 3
+  },
+  "scheduler": {
+    "daily_review": "0 22 * * *",
+    "weekly_review": "0 22 * * 0",
+    "monthly_review": "0 22 1 * *",
+    "compiler": "0 2 * * *",
+    "chat_archive": "55 23 * * *"
+  },
+  "notifications": {
+    "telegram": true
   },
   "app": {
-    "log_level": "INFO",
-    "scan_interval_minutes": 30
+    "log_level": "INFO"
   }
 }

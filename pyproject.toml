@@ -11,6 +11,7 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "pyyaml>=6.0",
     "aiosqlite>=0.20.0",
+    "apscheduler>=3.10.0",
     "python-telegram-bot[job-queue]>=22.0",
     "markdown>=3.5",
     "weasyprint>=60.0",

@@ -13,6 +13,7 @@ DATA_DIR = ROOT_DIR / "data"
 RAW_DIR = DATA_DIR / "raw"
 KNOWLEDGE_DIR = DATA_DIR / "knowledge"
 WIKI_DIR = DATA_DIR / "wiki"
+INBOX_DIR = DATA_DIR / "inbox"
 
 
 def _load_config() -> dict:
@@ -48,21 +49,30 @@ DATABASE_URL: str = _cfg["database"]["url"]
 CLASSIFIER_MODEL: str = _cfg["models"]["classifier"]
 AGENT_MODEL: str = _cfg["models"]["agent"]
 
+# Watcher
+_watcher = _cfg.get("watcher", {})
+WATCHER_INBOX_DIR: Path = ROOT_DIR / _watcher.get("inbox_dir", "data/inbox")
+WATCHER_PARALLEL_LIMIT: int = _watcher.get("parallel_limit", 3)
+
+# Scheduler (cron expressions)
+_scheduler = _cfg.get("scheduler", {})
+SCHEDULE_DAILY_REVIEW: str = _scheduler.get("daily_review", "0 22 * * *")
+SCHEDULE_WEEKLY_REVIEW: str = _scheduler.get("weekly_review", "0 22 * * 0")
+SCHEDULE_MONTHLY_REVIEW: str = _scheduler.get("monthly_review", "0 22 1 * *")
+SCHEDULE_COMPILER: str = _scheduler.get("compiler", "0 2 * * *")
+SCHEDULE_CHAT_ARCHIVE: str = _scheduler.get("chat_archive", "55 23 * * *")
+
+# Notifications
+_notifications = _cfg.get("notifications", {})
+NOTIFY_TELEGRAM: bool = _notifications.get("telegram", False)
+
 # App
 LOG_LEVEL: str = _cfg["app"]["log_level"]
-SCAN_INTERVAL_MINUTES: int = _cfg["app"]["scan_interval_minutes"]
 
 
 def load_categories() -> dict:
     """Load category definitions."""
     path = CONFIG_DIR / "categories.json"
-    with open(path, encoding="utf-8") as f:
-        return json.load(f)
-
-
-def load_schedules() -> dict:
-    """Load scheduled task configuration."""
-    path = CONFIG_DIR / "schedules.json"
     with open(path, encoding="utf-8") as f:
         return json.load(f)
 
@@ -77,5 +87,12 @@ def load_prompt(name: str) -> str:
 def load_skill(name: str) -> str:
     """Load a skill's SKILL.md content."""
     path = CONFIG_DIR / "skills" / name / "SKILL.md"
+    with open(path, encoding="utf-8") as f:
+        return f.read()
+
+
+def load_skill_prompt(name: str, prompt_name: str) -> str:
+    """Load a specific prompt file from a skill folder."""
+    path = CONFIG_DIR / "skills" / name / f"{prompt_name}.md"
     with open(path, encoding="utf-8") as f:
         return f.read()

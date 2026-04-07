@@ -17,9 +17,11 @@ config.json
 data/raw/*
 data/knowledge/*
 data/wiki/*
+data/inbox/*
 !data/raw/.gitkeep
 !data/knowledge/.gitkeep
 !data/wiki/.gitkeep
+!data/inbox/.gitkeep
 
 # IDE
 .vscode/
