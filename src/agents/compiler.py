@@ -25,10 +25,11 @@ async def run_compiler() -> None:
 
     prompt = (
         "Please compile the knowledge base. "
-        "Start by listing all documents in knowledge/, "
-        "read the ones that haven't been compiled yet, "
-        "then generate summary articles, concept articles, "
+        "Start by reading the wiki index (read_wiki_index) to see what's already compiled, "
+        "then list all documents in knowledge/ to find new uncompiled content. "
+        "Read the new documents, then generate summary articles, concept articles, "
         "or connection analyses as appropriate. "
+        "For each article, provide a clear one-line summary (max 150 chars). "
         "Write each compiled article to wiki/ using the write_wiki_article tool. "
         "Focus on extracting key insights and identifying connections between documents."
     )

@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS wiki_articles (
     title TEXT NOT NULL,
     article_type TEXT NOT NULL,
     file_path TEXT NOT NULL,
+    summary TEXT DEFAULT '',
     source_document_ids TEXT DEFAULT '[]',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
@@ -90,9 +91,15 @@ def get_connection() -> sqlite3.Connection:
 
 
 def init_db() -> None:
-    """Initialize database tables."""
+    """Initialize database tables and run migrations."""
     conn = get_connection()
     conn.executescript(SCHEMA)
+    # Migration: add summary column if missing (for existing DBs)
+    try:
+        conn.execute("SELECT summary FROM wiki_articles LIMIT 1")
+    except sqlite3.OperationalError:
+        conn.execute("ALTER TABLE wiki_articles ADD COLUMN summary TEXT DEFAULT ''")
+        logger.info("Migration: added summary column to wiki_articles")
     conn.commit()
     conn.close()
     logger.info("Database initialized at %s", DB_PATH)
@@ -164,6 +171,32 @@ def log_operation(
         VALUES (?, ?, ?, ?, ?, ?)""",
         (document_id, operation, from_path, to_path, details_json, now_iso()),
     )
+    conn.commit()
+    conn.close()
+
+
+# ── Wiki Articles ──
+
+def list_wiki_articles_db() -> list[dict]:
+    """List all wiki articles from database."""
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT id, title, article_type, file_path, summary, source_document_ids, created_at, updated_at "
+        "FROM wiki_articles ORDER BY article_type, title"
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def update_wiki_article(article_id: str, **fields) -> None:
+    """Update wiki article fields by ID."""
+    if not fields:
+        return
+    fields["updated_at"] = now_iso()
+    set_clause = ", ".join(f"{k} = ?" for k in fields)
+    values = list(fields.values()) + [article_id]
+    conn = get_connection()
+    conn.execute(f"UPDATE wiki_articles SET {set_clause} WHERE id = ?", values)
     conn.commit()
     conn.close()
 

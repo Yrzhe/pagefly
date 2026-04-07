@@ -120,7 +120,7 @@ def _collect_all_doc_ids() -> set[str]:
     return ids
 
 
-VALID_ARTICLE_TYPES = {"summary", "concept", "connection"}
+VALID_ARTICLE_TYPES = {"summary", "concept", "connection", "insight", "qa", "lint"}
 VALID_RELATIONS = {"source", "derived_from", "related_concept", "supports", "contradicts"}
 
 
@@ -169,15 +169,16 @@ def _validate_wiki_article(args: dict, known_ids: set[str]) -> list[str]:
 @tool(
     "write_wiki_article",
     (
-        "Write a compiled article to wiki/. Provide: article_type (summary|concept|connection), "
-        "title, content (markdown), source_doc_ids (list of source knowledge document IDs), "
+        "Write a compiled article to wiki/. Provide: article_type (summary|concept|connection|insight|qa), "
+        "title, content (markdown), summary (one-line description, max 150 chars), "
+        "source_doc_ids (list of source knowledge document IDs), "
         "and references (list of {target_id, relation, confidence}). "
         "Relation types: source (from knowledge), derived_from (from wiki), "
         "related_concept, supports, contradicts. "
         "All IDs in source_doc_ids and references.target_id are validated against existing documents. "
         "Invalid references will be dropped with warnings."
     ),
-    {"article_type": str, "title": str, "content": str, "source_doc_ids": list, "references": list},
+    {"article_type": str, "title": str, "content": str, "summary": str, "source_doc_ids": list, "references": list},
 )
 async def write_wiki_article(args):
     """Write a compiled article to wiki/ with full validation."""
@@ -198,6 +199,7 @@ async def write_wiki_article(args):
     article_type = args["article_type"]
     title = args["title"]
     content = args["content"]
+    summary = args.get("summary", "")[:150]
     source_doc_ids = args["source_doc_ids"]
     references = args.get("references", [])
 
@@ -270,12 +272,19 @@ async def write_wiki_article(args):
     # Record in database
     conn = db.get_connection()
     conn.execute(
-        """INSERT INTO wiki_articles (id, title, article_type, file_path, source_document_ids, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)""",
-        (article_id, title, article_type, str(article_dir), json.dumps(valid_source_ids), timestamp, timestamp),
+        """INSERT INTO wiki_articles (id, title, article_type, file_path, summary, source_document_ids, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        (article_id, title, article_type, str(article_dir), summary, json.dumps(valid_source_ids), timestamp, timestamp),
     )
     conn.commit()
     conn.close()
+
+    # Regenerate wiki index
+    from src.shared.indexer import generate_wiki_index
+    try:
+        generate_wiki_index()
+    except Exception as e:
+        logger.warning("Failed to regenerate wiki index: %s", e)
 
     warnings = []
     if dropped_sources:
@@ -292,8 +301,31 @@ async def write_wiki_article(args):
 
 
 @tool(
+    "read_wiki_index",
+    (
+        "Read the wiki INDEX.md — a compact overview of all wiki articles and knowledge base stats. "
+        "Always read this FIRST before drilling into individual articles. "
+        "If INDEX.md doesn't exist yet, it will be generated."
+    ),
+    {},
+)
+async def read_wiki_index(args):
+    """Read wiki/INDEX.md for quick navigation."""
+    from src.shared.indexer import INDEX_PATH, generate_wiki_index
+
+    if not INDEX_PATH.exists():
+        generate_wiki_index()
+
+    if not INDEX_PATH.exists():
+        return {"content": [{"type": "text", "text": "Wiki index is empty — no articles yet."}]}
+
+    content = INDEX_PATH.read_text(encoding="utf-8")
+    return {"content": [{"type": "text", "text": content}]}
+
+
+@tool(
     "list_wiki_articles",
-    "List all existing wiki articles with their metadata.",
+    "List all existing wiki articles with their metadata. For a quick overview, use read_wiki_index instead.",
     {},
 )
 async def list_wiki_articles(args):
@@ -706,6 +738,7 @@ def build_knowledge_tools_server():
         tools=[
             list_knowledge_docs,
             read_document,
+            read_wiki_index,
             write_wiki_article,
             list_wiki_articles,
             search_documents,
@@ -744,6 +777,7 @@ def build_agent_options(
         allowed_tools=[
             "mcp__pagefly__list_knowledge_docs",
             "mcp__pagefly__read_document",
+            "mcp__pagefly__read_wiki_index",
             "mcp__pagefly__write_wiki_article",
             "mcp__pagefly__list_wiki_articles",
             "mcp__pagefly__search_documents",
