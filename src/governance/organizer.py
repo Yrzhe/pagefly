@@ -113,6 +113,14 @@ def _process_entry(doc_dir: Path) -> str | None:
         }, ensure_ascii=False),
     )
 
+    # Activity log
+    from src.shared.activity_log import append_log
+    append_log(
+        "classify",
+        f"{result.title}",
+        f"→ {relative_location} (confidence={result.confidence:.2f}, {new_status})",
+    )
+
     logger.info(
         "Organized: %s -> %s (confidence=%.2f, status=%s)",
         doc_dir.name, relative_location, result.confidence, new_status,

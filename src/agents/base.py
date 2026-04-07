@@ -301,6 +301,26 @@ async def write_wiki_article(args):
 
 
 @tool(
+    "read_activity_log",
+    (
+        "Read the current week's activity log (data/log.md). "
+        "Shows recent events: ingest, classify, compile, review. "
+        "Useful for understanding what happened recently in the knowledge base."
+    ),
+    {},
+)
+async def read_activity_log(args):
+    """Read the current activity log."""
+    from src.shared.activity_log import LOG_PATH
+
+    if not LOG_PATH.exists():
+        return {"content": [{"type": "text", "text": "No activity log yet."}]}
+
+    content = LOG_PATH.read_text(encoding="utf-8")
+    return {"content": [{"type": "text", "text": content}]}
+
+
+@tool(
     "read_wiki_index",
     (
         "Read the wiki INDEX.md — a compact overview of all wiki articles and knowledge base stats. "
@@ -738,6 +758,7 @@ def build_knowledge_tools_server():
         tools=[
             list_knowledge_docs,
             read_document,
+            read_activity_log,
             read_wiki_index,
             write_wiki_article,
             list_wiki_articles,
@@ -777,6 +798,7 @@ def build_agent_options(
         allowed_tools=[
             "mcp__pagefly__list_knowledge_docs",
             "mcp__pagefly__read_document",
+            "mcp__pagefly__read_activity_log",
             "mcp__pagefly__read_wiki_index",
             "mcp__pagefly__write_wiki_article",
             "mcp__pagefly__list_wiki_articles",

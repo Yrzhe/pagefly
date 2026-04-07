@@ -62,6 +62,14 @@ def ingest(input_data: IngestInput) -> str | None:
     )
     db.log_operation(doc_id, "ingest", to_path=str(doc_dir))
 
+    # Activity log
+    from src.shared.activity_log import append_log
+    append_log(
+        "ingest",
+        f"{input_data.original_filename}",
+        f"Type: {source_type}, {len(result.markdown)} chars → {doc_dir.name}/",
+    )
+
     logger.info("Ingested document: %s (id=%s)", doc_dir.name, doc_id[:8])
     return doc_id
 

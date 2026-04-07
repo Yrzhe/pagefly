@@ -34,6 +34,7 @@ async def run_compiler() -> None:
         "Focus on extracting key insights and identifying connections between documents."
     )
 
+    from src.shared.activity_log import append_log
     logger.info("Starting compiler agent...")
 
     async for message in query(prompt=prompt, options=options):
@@ -42,6 +43,7 @@ async def run_compiler() -> None:
         elif hasattr(message, "result"):
             logger.info("Agent result: %s", str(message.result)[:200])
 
+    append_log("compile", "Compiler run finished")
     logger.info("Compiler agent finished.")
 
 

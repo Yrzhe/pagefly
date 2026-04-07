@@ -42,6 +42,9 @@ async def run_review(review_type: str = "daily") -> str:
 
     response = "\n".join(response_parts) if response_parts else f"No {review_type} review generated."
 
+    from src.shared.activity_log import append_log
+    append_log("review", f"{review_type} review", f"{len(response)} chars generated")
+
     logger.info("%s review complete (%d chars)", review_type, len(response))
     return response
 
