@@ -1,5 +1,6 @@
 """Shared agent setup — env configuration and common tool definitions."""
 
+import asyncio
 import json
 import os
 from pathlib import Path
@@ -18,6 +19,10 @@ from src.shared.logger import get_logger
 from src.ingest.metadata import read_metadata
 
 logger = get_logger("agents.base")
+
+# Queue for files that agent wants to send to the user.
+# Telegram handler consumes this after agent finishes.
+file_send_queue: asyncio.Queue[Path] = asyncio.Queue()
 
 
 def setup_env() -> None:
@@ -307,12 +312,228 @@ async def list_wiki_articles(args):
     return {"content": [{"type": "text", "text": json.dumps(articles, ensure_ascii=False, indent=2)}]}
 
 
+@tool(
+    "search_documents",
+    "Search across all knowledge/ and wiki/ documents by keyword. Returns matching documents with snippets.",
+    {"keyword": str},
+)
+async def search_documents(args):
+    """Full-text search across knowledge base."""
+    keyword = args["keyword"].lower()
+    results = []
+
+    for root_dir, doc_type in ((KNOWLEDGE_DIR, "knowledge"), (WIKI_DIR, "wiki")):
+        if not root_dir.exists():
+            continue
+        for md_path in root_dir.rglob("document.md"):
+            content = md_path.read_text(encoding="utf-8")
+            if keyword not in content.lower():
+                continue
+            meta_path = md_path.parent / "metadata.json"
+            meta = {}
+            if meta_path.exists():
+                meta = json.loads(meta_path.read_text(encoding="utf-8"))
+
+            # Extract snippet around keyword
+            idx = content.lower().index(keyword)
+            start = max(0, idx - 100)
+            end = min(len(content), idx + len(keyword) + 100)
+            snippet = content[start:end].replace("\n", " ")
+
+            results.append({
+                "type": doc_type,
+                "id": meta.get("id", ""),
+                "title": meta.get("title", ""),
+                "snippet": f"...{snippet}...",
+                "path": str(md_path.parent.relative_to(root_dir)),
+            })
+
+    return {"content": [{"type": "text", "text": json.dumps(results, ensure_ascii=False, indent=2)}]}
+
+
+@tool(
+    "update_document_content",
+    (
+        "Update an existing document's markdown content. Provide doc_id and new_content. "
+        "This is a DESTRUCTIVE operation — the agent MUST get user approval before calling this. "
+        "Returns the old and new content length for verification."
+    ),
+    {"doc_id": str, "new_content": str},
+)
+async def update_document_content(args):
+    """Update a document's content (requires prior approval)."""
+    from src.ingest.metadata import now_iso
+    from src.storage import db
+
+    doc_id = args["doc_id"]
+    new_content = args["new_content"]
+
+    # Find the document by ID
+    doc_dir = _find_doc_dir_by_id(doc_id)
+    if doc_dir is None:
+        return {"content": [{"type": "text", "text": f"Error: document not found: {doc_id}"}]}
+
+    md_path = doc_dir / "document.md"
+    old_content = md_path.read_text(encoding="utf-8")
+    md_path.write_text(new_content, encoding="utf-8")
+
+    # Log operation
+    db.log_operation(doc_id, "update_content", from_path=str(doc_dir), to_path=str(doc_dir))
+
+    logger.info("Document content updated: %s (%d -> %d chars)", doc_id[:8], len(old_content), len(new_content))
+    return {"content": [{"type": "text", "text": f"Updated: {doc_id[:8]} ({len(old_content)} -> {len(new_content)} chars)"}]}
+
+
+@tool(
+    "create_knowledge_doc",
+    "Create a new document in knowledge/. Provide: title, content (markdown), category, tags.",
+    {"title": str, "content": str, "category": str, "tags": list},
+)
+async def create_knowledge_doc(args):
+    """Create a new knowledge document."""
+    from src.ingest.metadata import generate_id, now_iso, write_metadata
+    from src.storage import db
+    from src.storage.files import create_file
+
+    title = args["title"]
+    content = args["content"]
+    category = args.get("category", "notes")
+    tags = args.get("tags", [])
+
+    doc_id = generate_id()
+    timestamp = now_iso()
+    sanitized = "".join(c for c in title if c not in r'\/:*?"<>|')[:60].strip()
+    folder_name = f"{sanitized}_{doc_id[:8]}"
+
+    doc_dir = KNOWLEDGE_DIR / category / folder_name
+    create_file(doc_dir / "document.md", content)
+
+    metadata = {
+        "id": doc_id,
+        "title": title,
+        "description": "",
+        "source_type": "agent",
+        "original_filename": "",
+        "ingested_at": timestamp,
+        "status": "classified",
+        "location": str(doc_dir.relative_to(doc_dir.parents[2])),
+        "tags": tags,
+        "category": category,
+        "subcategory": "",
+        "references": [],
+    }
+    write_metadata(doc_dir, metadata)
+
+    db.insert_document(
+        doc_id=doc_id,
+        title=title,
+        source_type="agent",
+        original_filename="",
+        current_path=str(doc_dir),
+        ingested_at=timestamp,
+    )
+    db.update_document(doc_id, status="classified", category=category, tags=json.dumps(tags, ensure_ascii=False))
+    db.log_operation(doc_id, "ingest", to_path=str(doc_dir))
+
+    logger.info("Knowledge doc created: %s (%s)", title, category)
+    return {"content": [{"type": "text", "text": f"Created: {doc_dir} (id={doc_id[:8]})"}]}
+
+
+def _find_doc_dir_by_id(doc_id: str) -> Path | None:
+    """Find a document folder by its ID across knowledge/ and wiki/."""
+    for root_dir in (KNOWLEDGE_DIR, WIKI_DIR):
+        if not root_dir.exists():
+            continue
+        for meta_path in root_dir.rglob("metadata.json"):
+            try:
+                meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                if meta.get("id") == doc_id:
+                    return meta_path.parent
+            except Exception:
+                pass
+    return None
+
+
+@tool(
+    "send_document_as_zip",
+    "Package a document folder as ZIP and send it to the user. Provide doc_id.",
+    {"doc_id": str},
+)
+async def send_document_as_zip(args):
+    """Package and queue a document for sending."""
+    from src.shared.packaging import zip_document
+
+    doc_id = args["doc_id"]
+    doc_dir = _find_doc_dir_by_id(doc_id)
+    if doc_dir is None:
+        return {"content": [{"type": "text", "text": f"Error: document not found: {doc_id}"}]}
+
+    try:
+        zip_path = zip_document(doc_dir)
+        await file_send_queue.put(zip_path)
+        logger.info("Queued ZIP for sending: %s", zip_path)
+        return {"content": [{"type": "text", "text": f"ZIP ready: {doc_dir.name}.zip"}]}
+    except Exception as e:
+        return {"content": [{"type": "text", "text": f"Error creating ZIP: {e}"}]}
+
+
+@tool(
+    "send_document_as_pdf",
+    "Render a document's markdown as PDF and send it to the user. Provide doc_id.",
+    {"doc_id": str},
+)
+async def send_document_as_pdf(args):
+    """Render and queue a PDF for sending."""
+    from src.shared.packaging import create_pdf_from_markdown
+
+    doc_id = args["doc_id"]
+    doc_dir = _find_doc_dir_by_id(doc_id)
+    if doc_dir is None:
+        return {"content": [{"type": "text", "text": f"Error: document not found: {doc_id}"}]}
+
+    md_path = doc_dir / "document.md"
+    if not md_path.exists():
+        return {"content": [{"type": "text", "text": f"Error: no document.md in {doc_dir.name}"}]}
+
+    # Get title from metadata
+    meta_path = doc_dir / "metadata.json"
+    title = doc_dir.name
+    if meta_path.exists():
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        title = meta.get("title", title)
+
+    try:
+        pdf_path = create_pdf_from_markdown(md_path, title)
+        await file_send_queue.put(pdf_path)
+        logger.info("Queued PDF for sending: %s", pdf_path)
+        return {"content": [{"type": "text", "text": f"PDF ready: {title}.pdf"}]}
+    except RuntimeError as e:
+        # weasyprint not installed — fallback to ZIP
+        logger.warning("PDF generation unavailable: %s. Falling back to ZIP.", e)
+        from src.shared.packaging import zip_document
+        zip_path = zip_document(doc_dir)
+        await file_send_queue.put(zip_path)
+        return {"content": [{"type": "text", "text": f"PDF unavailable, sent as ZIP: {doc_dir.name}.zip"}]}
+    except Exception as e:
+        return {"content": [{"type": "text", "text": f"Error creating PDF: {e}"}]}
+
+
 def build_knowledge_tools_server():
     """Create MCP server with all knowledge/wiki tools."""
     return create_sdk_mcp_server(
         name="pagefly-tools",
         version="1.0.0",
-        tools=[list_knowledge_docs, read_document, write_wiki_article, list_wiki_articles],
+        tools=[
+            list_knowledge_docs,
+            read_document,
+            write_wiki_article,
+            list_wiki_articles,
+            search_documents,
+            update_document_content,
+            create_knowledge_doc,
+            send_document_as_zip,
+            send_document_as_pdf,
+        ],
     )
 
 
@@ -339,6 +560,11 @@ def build_agent_options(
             "mcp__pagefly__read_document",
             "mcp__pagefly__write_wiki_article",
             "mcp__pagefly__list_wiki_articles",
+            "mcp__pagefly__search_documents",
+            "mcp__pagefly__update_document_content",
+            "mcp__pagefly__create_knowledge_doc",
+            "mcp__pagefly__send_document_as_zip",
+            "mcp__pagefly__send_document_as_pdf",
         ],
         permission_mode="bypassPermissions",
         max_turns=max_turns,

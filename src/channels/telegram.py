@@ -1,0 +1,422 @@
+"""Telegram bot — interactive channel for the Query Agent."""
+
+import asyncio
+import json
+import re
+from datetime import datetime, timezone
+from pathlib import Path
+
+from telegram import BotCommand, Update
+from telegram.constants import ParseMode
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    MessageHandler,
+    filters,
+)
+
+from src.agents.base import file_send_queue
+from src.agents.query import QuerySession, ask
+from src.shared.packaging import cleanup_temp_file
+from src.shared.config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, KNOWLEDGE_DIR
+from src.shared.logger import get_logger
+from src.storage.db import init_db
+
+logger = get_logger("channels.telegram")
+
+# Per-chat sessions for multi-turn conversations
+_sessions: dict[int, QuerySession] = {}
+
+
+def _get_session(chat_id: int) -> QuerySession:
+    """Get or create a session for a chat."""
+    if chat_id not in _sessions:
+        _sessions[chat_id] = QuerySession()
+    return _sessions[chat_id]
+
+
+def _escape_md(text: str) -> str:
+    """Escape special characters for Telegram MarkdownV2."""
+    special = r"_*[]()~`>#+-=|{}.!"
+    return re.sub(f"([{re.escape(special)}])", r"\\\1", text)
+
+
+def _format_response(text: str) -> str:
+    """
+    Convert agent response to Telegram MarkdownV2.
+    Handles: bold, italic, code blocks, inline code, headers, lists.
+    Tables are converted to plain lists.
+    """
+    lines = text.split("\n")
+    result = []
+    in_code_block = False
+
+    for line in lines:
+        # Code block toggle
+        if line.strip().startswith("```"):
+            in_code_block = not in_code_block
+            result.append(line)
+            continue
+
+        if in_code_block:
+            result.append(line)
+            continue
+
+        # Skip table separator lines
+        if re.match(r"^\s*\|[-\s|:]+\|\s*$", line):
+            continue
+
+        # Convert table rows to plain text
+        if line.strip().startswith("|") and line.strip().endswith("|"):
+            cells = [c.strip() for c in line.strip().strip("|").split("|")]
+            line = "  ".join(cells)
+
+        # Convert headers to bold
+        header_match = re.match(r"^(#{1,3})\s+(.*)", line)
+        if header_match:
+            header_text = _escape_md(header_match.group(2))
+            result.append(f"*{header_text}*")
+            continue
+
+        # Convert **bold** — extract before escaping
+        bold_parts = re.split(r"\*\*(.*?)\*\*", line)
+        if len(bold_parts) > 1:
+            formatted = ""
+            for i, part in enumerate(bold_parts):
+                if i % 2 == 0:
+                    formatted += _escape_md(part)
+                else:
+                    formatted += f"*{_escape_md(part)}*"
+            result.append(formatted)
+            continue
+
+        result.append(_escape_md(line))
+
+    return "\n".join(result)
+
+
+async def _post_init(app: Application) -> None:
+    """Register bot commands so they show in the / menu."""
+    commands = [
+        BotCommand("start", "Show help"),
+        BotCommand("search", "Search documents by keyword"),
+        BotCommand("status", "Show knowledge base stats"),
+        BotCommand("reset", "Clear conversation context"),
+    ]
+    await app.bot.set_my_commands(commands)
+    logger.info("Bot commands registered")
+
+
+async def _cmd_start(update: Update, context) -> None:
+    """Handle /start command."""
+    text = (
+        "*PageFly Knowledge OS*\n\n"
+        "Send me a message to query your knowledge base\\.\n\n"
+        "*Commands:*\n"
+        "/search <keyword> \\— search documents\n"
+        "/status \\— show knowledge base stats\n"
+        "/reset \\— clear conversation context\n\n"
+        "You can also upload PDF/text files to ingest them\\."
+    )
+    await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN_V2)
+
+
+async def _cmd_reset(update: Update, context) -> None:
+    """Handle /reset command."""
+    chat_id = update.effective_chat.id
+    _sessions[chat_id] = QuerySession()
+    await update.message.reply_text("Conversation context cleared\\.", parse_mode=ParseMode.MARKDOWN_V2)
+
+
+async def _cmd_status(update: Update, context) -> None:
+    """Handle /status command."""
+    from src.storage.db import get_connection
+
+    conn = get_connection()
+    doc_count = conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
+    wiki_count = conn.execute("SELECT COUNT(*) FROM wiki_articles").fetchone()[0]
+    ops_count = conn.execute("SELECT COUNT(*) FROM operations_log").fetchone()[0]
+    conn.close()
+
+    text = (
+        f"*Knowledge Base Stats*\n\n"
+        f"Documents: {doc_count}\n"
+        f"Wiki articles: {wiki_count}\n"
+        f"Operations logged: {ops_count}"
+    )
+    await update.message.reply_text(_escape_md(text).replace(r"\*", "*"), parse_mode=ParseMode.MARKDOWN_V2)
+
+
+async def _cmd_search(update: Update, context) -> None:
+    """Handle /search <keyword> command."""
+    if not context.args:
+        await update.message.reply_text("Usage: /search <keyword>")
+        return
+
+    keyword = " ".join(context.args).lower()
+    wiki_dir = KNOWLEDGE_DIR.parent / "wiki"
+
+    results = []
+    for root_dir, doc_type in ((KNOWLEDGE_DIR, "knowledge"), (wiki_dir, "wiki")):
+        if not root_dir.exists():
+            continue
+        for md_path in root_dir.rglob("document.md"):
+            content = md_path.read_text(encoding="utf-8")
+            if keyword not in content.lower():
+                continue
+            meta_path = md_path.parent / "metadata.json"
+            title = md_path.parent.name
+            if meta_path.exists():
+                meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                title = meta.get("title", title)
+            results.append(f"[{doc_type}] {title}")
+
+    if results:
+        lines = "\n".join(f"  {r}" for r in results[:10])
+        text = f"Found {len(results)} result(s):\n{lines}"
+    else:
+        text = f"No results for '{keyword}'"
+
+    await update.message.reply_text(text)
+
+
+async def _keep_typing(chat, stop_event: asyncio.Event) -> None:
+    """Send typing action every 4 seconds until stop_event is set."""
+    while not stop_event.is_set():
+        try:
+            await chat.send_action("typing")
+        except Exception:
+            pass
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=4)
+        except asyncio.TimeoutError:
+            pass
+
+
+# Friendly names for tool display
+_TOOL_LABELS = {
+    "list_knowledge_docs": "Listing documents",
+    "read_document": "Reading document",
+    "search_documents": "Searching",
+    "write_wiki_article": "Writing wiki article",
+    "list_wiki_articles": "Listing wiki articles",
+    "update_document_content": "Updating document",
+    "create_knowledge_doc": "Creating document",
+}
+
+
+async def _handle_message(update: Update, context) -> None:
+    """Handle regular text messages — send to query agent."""
+    chat_id = update.effective_chat.id
+    user_message = update.message.text
+
+    if TELEGRAM_CHAT_ID and str(chat_id) != str(TELEGRAM_CHAT_ID):
+        logger.warning("Unauthorized chat: %d", chat_id)
+        return
+
+    session = _get_session(chat_id)
+    logger.info("User message: %s", user_message[:100])
+
+    # Send status message and start typing indicator
+    status_msg = await update.message.reply_text("Thinking...")
+    stop_typing = asyncio.Event()
+    typing_task = asyncio.create_task(_keep_typing(update.message.chat, stop_typing))
+
+    try:
+        # Callback to update status message with current tool
+        async def on_tool_call(tool_name: str):
+            label = _TOOL_LABELS.get(tool_name, tool_name)
+            try:
+                await status_msg.edit_text(f"{label}...")
+            except Exception:
+                pass
+
+        response = await ask(user_message, session, on_tool_call=on_tool_call)
+
+        # Stop typing indicator
+        stop_typing.set()
+        await typing_task
+
+        # Delete status message
+        try:
+            await status_msg.delete()
+        except Exception:
+            pass
+
+        # Send formatted response
+        formatted = _format_response(response)
+
+        if len(formatted) > 4000:
+            chunks = [formatted[i:i+4000] for i in range(0, len(formatted), 4000)]
+            for chunk in chunks:
+                try:
+                    await update.message.reply_text(chunk, parse_mode=ParseMode.MARKDOWN_V2)
+                except Exception:
+                    await update.message.reply_text(response[:4000])
+        else:
+            try:
+                await update.message.reply_text(formatted, parse_mode=ParseMode.MARKDOWN_V2)
+            except Exception:
+                await update.message.reply_text(response)
+
+        # Send any queued files
+        while not file_send_queue.empty():
+            file_path = await file_send_queue.get()
+            try:
+                with open(file_path, "rb") as f:
+                    await update.message.reply_document(
+                        document=f,
+                        filename=file_path.name,
+                    )
+                logger.info("Sent file: %s", file_path.name)
+            except Exception as e:
+                logger.error("Failed to send file %s: %s", file_path, e)
+            finally:
+                cleanup_temp_file(file_path)
+
+    except Exception as e:
+        stop_typing.set()
+        await typing_task
+        logger.error("Agent error: %s", e)
+        try:
+            await status_msg.edit_text(f"Error: {e}")
+        except Exception:
+            await update.message.reply_text(f"Error: {e}")
+
+
+async def _handle_document(update: Update, context) -> None:
+    """Handle document uploads — ingest into raw/."""
+    chat_id = update.effective_chat.id
+    if TELEGRAM_CHAT_ID and str(chat_id) != str(TELEGRAM_CHAT_ID):
+        return
+
+    doc = update.message.document
+    if not doc:
+        return
+
+    filename = doc.file_name or "unnamed"
+    await update.message.reply_text(f"Received: {filename}\nProcessing...")
+
+    try:
+        file = await context.bot.get_file(doc.file_id)
+        tmp_path = Path(f"/tmp/pagefly_{filename}")
+        await file.download_to_drive(str(tmp_path))
+
+        from src.ingest.pipeline import ingest
+        from src.shared.types import IngestInput
+
+        input_data = IngestInput(
+            type="file",
+            file_path=str(tmp_path),
+            original_filename=filename,
+        )
+        doc_id = ingest(input_data)
+
+        if doc_id:
+            await update.message.reply_text(f"Ingested: {filename}\nDocument ID: {doc_id[:8]}")
+        else:
+            await update.message.reply_text(f"Failed to ingest: {filename}")
+
+        tmp_path.unlink(missing_ok=True)
+
+    except Exception as e:
+        logger.error("Document ingest error: %s", e)
+        await update.message.reply_text(f"Error processing document: {e}")
+
+
+async def _save_daily_chat(context) -> None:
+    """Scheduled job: archive today's chat as a knowledge document."""
+    from src.ingest.metadata import generate_id, now_iso, write_metadata
+    from src.storage import db
+    from src.storage.files import create_file
+
+    today = datetime.now(timezone.utc).astimezone().strftime("%Y-%m-%d")
+
+    for chat_id, session in _sessions.items():
+        if not session.messages:
+            continue
+
+        lines = []
+        for msg in session.messages:
+            role = "User" if msg["role"] == "user" else "PageFly"
+            lines.append(f"**{role}**: {msg['content']}")
+
+        content = f"# Chat Log — {today}\n\n" + "\n\n".join(lines)
+
+        doc_id = generate_id()
+        timestamp = now_iso()
+        folder_name = f"chat_{today}_{doc_id[:8]}"
+        doc_dir = KNOWLEDGE_DIR / "conversations" / folder_name
+
+        create_file(doc_dir / "document.md", content)
+        metadata = {
+            "id": doc_id,
+            "title": f"Chat Log {today}",
+            "description": f"Daily conversation log from {today}",
+            "source_type": "conversation",
+            "original_filename": "",
+            "ingested_at": timestamp,
+            "status": "classified",
+            "location": f"knowledge/conversations/{folder_name}",
+            "tags": ["chat", "daily"],
+            "category": "conversations",
+            "subcategory": "",
+            "references": [],
+        }
+        write_metadata(doc_dir, metadata)
+
+        db.insert_document(
+            doc_id=doc_id,
+            title=f"Chat Log {today}",
+            source_type="conversation",
+            original_filename="",
+            current_path=str(doc_dir),
+            ingested_at=timestamp,
+        )
+        db.update_document(doc_id, status="classified", category="conversations")
+        db.log_operation(doc_id, "ingest", to_path=str(doc_dir))
+
+        logger.info("Saved daily chat log: %s (%d messages)", today, len(session.messages))
+
+    _sessions.clear()
+
+
+def run_bot() -> None:
+    """Start the Telegram bot."""
+    if not TELEGRAM_BOT_TOKEN or TELEGRAM_BOT_TOKEN == "xxx":
+        raise ValueError("TELEGRAM_BOT_TOKEN not configured in config.json")
+
+    init_db()
+    app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+
+    # Register commands on startup
+    app.post_init = _post_init
+
+    # Command handlers
+    app.add_handler(CommandHandler("start", _cmd_start))
+    app.add_handler(CommandHandler("reset", _cmd_reset))
+    app.add_handler(CommandHandler("status", _cmd_status))
+    app.add_handler(CommandHandler("search", _cmd_search))
+
+    # Document uploads
+    app.add_handler(MessageHandler(filters.Document.ALL, _handle_document))
+
+    # Text messages
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, _handle_message))
+
+    # Daily chat archive job at 23:55
+    job_queue = app.job_queue
+    if job_queue:
+        job_queue.run_daily(
+            _save_daily_chat,
+            time=datetime.strptime("23:55", "%H:%M").time(),
+            name="daily_chat_archive",
+        )
+        logger.info("Daily chat archive job scheduled at 23:55")
+
+    logger.info("Telegram bot starting...")
+    app.run_polling(drop_pending_updates=True)
+
+
+if __name__ == "__main__":
+    run_bot()
