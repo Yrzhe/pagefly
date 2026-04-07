@@ -43,6 +43,7 @@ def build_metadata(source_type: str, original_filename: str) -> dict:
         "tags": [],
         "category": "",
         "subcategory": "",
+        "references": [],
     }
 
 
