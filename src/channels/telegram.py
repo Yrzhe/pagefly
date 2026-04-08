@@ -29,7 +29,8 @@ logger = get_logger("channels.telegram")
 # Per-chat sessions for multi-turn conversations (with timestamps for TTL)
 _sessions: dict[int, tuple[QuerySession, float]] = {}
 _MAX_SESSIONS = 100
-_SESSION_TTL = 3600  # 1 hour
+_SESSION_TTL = 86400  # 24 hours
+_SESSION_MSG_CAP = 100  # Max messages per session (oldest trimmed)
 
 
 def _get_session(chat_id: int) -> QuerySession:
@@ -53,7 +54,13 @@ def _get_session(chat_id: int) -> QuerySession:
         session, _ = _sessions[chat_id]
         _sessions[chat_id] = (session, now)
 
-    return _sessions[chat_id][0]
+    session = _sessions[chat_id][0]
+
+    # Trim oldest messages if over cap
+    if len(session.messages) > _SESSION_MSG_CAP:
+        session.messages = session.messages[-_SESSION_MSG_CAP:]
+
+    return session
 
 
 def _escape_md(text: str) -> str:
@@ -122,6 +129,7 @@ async def _post_init(app: Application) -> None:
         BotCommand("start", "Show help"),
         BotCommand("search", "Search documents by keyword"),
         BotCommand("status", "Show knowledge base stats"),
+        BotCommand("save", "Save conversation as memo"),
         BotCommand("reset", "Clear conversation context"),
     ]
     await app.bot.set_my_commands(commands)
@@ -140,6 +148,74 @@ async def _cmd_start(update: Update, context) -> None:
         "You can also upload PDF/text files to ingest them\\."
     )
     await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN_V2)
+
+
+async def _cmd_save(update: Update, context) -> None:
+    """Handle /save command — save current conversation as a knowledge doc."""
+    chat_id = update.effective_chat.id
+    if TELEGRAM_CHAT_ID and str(chat_id) != str(TELEGRAM_CHAT_ID):
+        return
+
+    session = _get_session(chat_id)
+    if not session.messages:
+        await update.message.reply_text("No conversation to save.")
+        return
+
+    from src.ingest.metadata import generate_id, now_iso, write_metadata
+    from src.storage import db
+    from src.storage.files import create_file
+
+    now = datetime.now(timezone.utc).astimezone()
+    timestamp_str = now.strftime("%Y-%m-%d %H:%M")
+
+    # Build content
+    lines = []
+    for msg in session.messages:
+        role = "User" if msg["role"] == "user" else "PageFly"
+        lines.append(f"**{role}**: {msg['content']}")
+
+    # Extract title from first user message
+    first_user = next((m["content"][:60] for m in session.messages if m["role"] == "user"), "Conversation")
+    title = f"Memo: {first_user}"
+
+    content = f"# {title}\n\n> Saved at {timestamp_str}\n\n" + "\n\n".join(lines)
+
+    doc_id = generate_id()
+    ts = now_iso()
+    folder_name = f"memo_{now.strftime('%Y%m%d_%H%M')}_{doc_id[:8]}"
+    doc_dir = KNOWLEDGE_DIR / "notes" / folder_name
+
+    create_file(doc_dir / "document.md", content)
+    metadata = {
+        "id": doc_id,
+        "title": title,
+        "description": f"Conversation memo saved at {timestamp_str}",
+        "source_type": "conversation",
+        "original_filename": "",
+        "ingested_at": ts,
+        "status": "classified",
+        "location": f"knowledge/notes/{folder_name}",
+        "tags": ["memo", "conversation"],
+        "category": "notes",
+        "subcategory": "",
+        "references": [],
+    }
+    write_metadata(doc_dir, metadata)
+
+    db.insert_document(
+        doc_id=doc_id,
+        title=title,
+        source_type="conversation",
+        original_filename="",
+        current_path=str(doc_dir),
+        ingested_at=ts,
+    )
+    db.update_document(doc_id, status="classified", category="notes")
+
+    await update.message.reply_text(
+        f"Saved {len(session.messages)} messages as memo\nID: {doc_id[:8]}"
+    )
+    logger.info("Conversation saved as memo: %s (%d messages)", title[:40], len(session.messages))
 
 
 async def _cmd_reset(update: Update, context) -> None:
@@ -497,7 +573,7 @@ async def _save_daily_chat(context) -> None:
 
     today = datetime.now(timezone.utc).astimezone().strftime("%Y-%m-%d")
 
-    for chat_id, session in _sessions.items():
+    for chat_id, (session, _ts) in list(_sessions.items()):
         if not session.messages:
             continue
 
@@ -543,7 +619,8 @@ async def _save_daily_chat(context) -> None:
 
         logger.info("Saved daily chat log: %s (%d messages)", today, len(session.messages))
 
-    _sessions.clear()
+        # Trim to last 50 messages (keep context for tomorrow) instead of clearing
+        session.messages = session.messages[-50:]
 
 
 # ── Approval flow (inline keyboard) ──
@@ -630,6 +707,7 @@ def run_bot() -> None:
 
     # Command handlers
     app.add_handler(CommandHandler("start", _cmd_start))
+    app.add_handler(CommandHandler("save", _cmd_save))
     app.add_handler(CommandHandler("reset", _cmd_reset))
     app.add_handler(CommandHandler("status", _cmd_status))
     app.add_handler(CommandHandler("search", _cmd_search))
@@ -676,6 +754,7 @@ async def start_bot() -> Application:
     app.post_init = _post_init
 
     app.add_handler(CommandHandler("start", _cmd_start))
+    app.add_handler(CommandHandler("save", _cmd_save))
     app.add_handler(CommandHandler("reset", _cmd_reset))
     app.add_handler(CommandHandler("status", _cmd_status))
     app.add_handler(CommandHandler("search", _cmd_search))
