@@ -318,31 +318,21 @@ async def _handle_document(update: Update, context) -> None:
     filename = doc.file_name or "unnamed"
     await update.message.reply_text(f"Received: {filename}\nProcessing...")
 
+    tmp_path = _safe_tmp_path(filename)
     try:
         file = await context.bot.get_file(doc.file_id)
-        tmp_path = Path(f"/tmp/pagefly_{filename}")
         await file.download_to_drive(str(tmp_path))
 
-        from src.ingest.pipeline import ingest
-        from src.shared.types import IngestInput
-
-        input_data = IngestInput(
-            type="file",
-            file_path=str(tmp_path),
-            original_filename=filename,
-        )
-        doc_id = ingest(input_data)
-
+        doc_id = _ingest_file(str(tmp_path), filename)
         if doc_id:
             await update.message.reply_text(f"Ingested: {filename}\nDocument ID: {doc_id[:8]}")
         else:
             await update.message.reply_text(f"Failed to ingest: {filename}")
-
-        tmp_path.unlink(missing_ok=True)
-
     except Exception as e:
         logger.error("Document ingest error: %s", e)
         await update.message.reply_text(f"Error processing document: {e}")
+    finally:
+        _cleanup_tmp(tmp_path)
 
 
 async def _handle_photo(update: Update, context) -> None:
@@ -360,9 +350,9 @@ async def _handle_photo(update: Update, context) -> None:
     filename = f"photo_{photo.file_unique_id}.jpg"
     await update.message.reply_text("Processing photo...")
 
+    tmp_path = _safe_tmp_path(filename)
     try:
         file = await context.bot.get_file(photo.file_id)
-        tmp_path = Path(f"/tmp/pagefly_{filename}")
         await file.download_to_drive(str(tmp_path))
 
         doc_id = _ingest_file(str(tmp_path), filename)
@@ -370,11 +360,11 @@ async def _handle_photo(update: Update, context) -> None:
             await update.message.reply_text(f"Ingested photo: {doc_id[:8]}")
         else:
             await update.message.reply_text("Failed to ingest photo")
-
-        tmp_path.unlink(missing_ok=True)
     except Exception as e:
         logger.error("Photo ingest error: %s", e)
         await update.message.reply_text(f"Error processing photo: {e}")
+    finally:
+        _cleanup_tmp(tmp_path)
 
 
 async def _handle_voice(update: Update, context) -> None:
@@ -390,9 +380,9 @@ async def _handle_voice(update: Update, context) -> None:
     filename = f"voice_{voice.file_unique_id}.ogg"
     await update.message.reply_text("Transcribing voice message...")
 
+    tmp_path = _safe_tmp_path(filename)
     try:
         file = await context.bot.get_file(voice.file_id)
-        tmp_path = Path(f"/tmp/pagefly_{filename}")
         await file.download_to_drive(str(tmp_path))
 
         doc_id = _ingest_file(str(tmp_path), filename)
@@ -400,11 +390,11 @@ async def _handle_voice(update: Update, context) -> None:
             await update.message.reply_text(f"Voice transcribed and ingested: {doc_id[:8]}")
         else:
             await update.message.reply_text("Failed to transcribe voice message")
-
-        tmp_path.unlink(missing_ok=True)
     except Exception as e:
         logger.error("Voice ingest error: %s", e)
         await update.message.reply_text(f"Error processing voice: {e}")
+    finally:
+        _cleanup_tmp(tmp_path)
 
 
 async def _handle_audio(update: Update, context) -> None:
@@ -420,9 +410,9 @@ async def _handle_audio(update: Update, context) -> None:
     filename = audio.file_name or f"audio_{audio.file_unique_id}.mp3"
     await update.message.reply_text(f"Transcribing: {filename}...")
 
+    tmp_path = _safe_tmp_path(filename)
     try:
         file = await context.bot.get_file(audio.file_id)
-        tmp_path = Path(f"/tmp/pagefly_{filename}")
         await file.download_to_drive(str(tmp_path))
 
         doc_id = _ingest_file(str(tmp_path), filename)
@@ -430,11 +420,11 @@ async def _handle_audio(update: Update, context) -> None:
             await update.message.reply_text(f"Audio transcribed and ingested: {doc_id[:8]}")
         else:
             await update.message.reply_text(f"Failed to transcribe: {filename}")
-
-        tmp_path.unlink(missing_ok=True)
     except Exception as e:
         logger.error("Audio ingest error: %s", e)
         await update.message.reply_text(f"Error processing audio: {e}")
+    finally:
+        _cleanup_tmp(tmp_path)
 
 
 async def _handle_video(update: Update, context) -> None:
@@ -450,9 +440,9 @@ async def _handle_video(update: Update, context) -> None:
     filename = getattr(video, "file_name", None) or f"video_{video.file_unique_id}.mp4"
     await update.message.reply_text(f"Processing video: {filename}...")
 
+    tmp_path = _safe_tmp_path(filename)
     try:
         file = await context.bot.get_file(video.file_id)
-        tmp_path = Path(f"/tmp/pagefly_{filename}")
         await file.download_to_drive(str(tmp_path))
 
         doc_id = _ingest_file(str(tmp_path), filename)
@@ -460,11 +450,19 @@ async def _handle_video(update: Update, context) -> None:
             await update.message.reply_text(f"Video ingested: {doc_id[:8]}")
         else:
             await update.message.reply_text(f"Failed to process video: {filename}")
-
-        tmp_path.unlink(missing_ok=True)
     except Exception as e:
         logger.error("Video ingest error: %s", e)
         await update.message.reply_text(f"Error processing video: {e}")
+    finally:
+        _cleanup_tmp(tmp_path)
+
+
+def _safe_tmp_path(filename: str) -> Path:
+    """Create a safe temp path — strip path traversal from filename."""
+    import tempfile
+    safe_name = re.sub(r'[^\w\-.]', '_', Path(filename).name) or "upload"
+    tmp_dir = Path(tempfile.mkdtemp(prefix="pagefly_"))
+    return tmp_dir / safe_name
 
 
 def _ingest_file(file_path: str, original_filename: str) -> str | None:
@@ -478,6 +476,17 @@ def _ingest_file(file_path: str, original_filename: str) -> str | None:
         original_filename=original_filename,
     )
     return ingest(input_data)
+
+
+def _cleanup_tmp(tmp_path: Path) -> None:
+    """Clean up temp file and its parent dir."""
+    try:
+        tmp_path.unlink(missing_ok=True)
+        parent = tmp_path.parent
+        if parent.exists() and parent.name.startswith("pagefly_") and not any(parent.iterdir()):
+            parent.rmdir()
+    except Exception:
+        pass
 
 
 async def _save_daily_chat(context) -> None:
