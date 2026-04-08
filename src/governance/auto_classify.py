@@ -13,6 +13,11 @@ _executor = ThreadPoolExecutor(max_workers=WATCHER_PARALLEL_LIMIT, thread_name_p
 _lock = threading.Lock()
 _pending: set[str] = set()  # doc_ids currently being classified
 
+# Compiler debounce: trigger once after a batch of classifications settle
+_COMPILER_DEBOUNCE_SECS = 60
+_compiler_timer: threading.Timer | None = None
+_compiler_lock = threading.Lock()
+
 
 def schedule_classify(doc_dir: Path, doc_id: str) -> None:
     """Submit a document for background classification. Non-blocking."""
@@ -43,6 +48,7 @@ def _classify_worker(doc_dir: Path, doc_id: str) -> None:
 
         if result:
             logger.info("Auto-classified: %s", doc_id[:8])
+            _schedule_compiler()
 
             # Notify via Telegram if configured
             try:
@@ -68,3 +74,33 @@ def _classify_worker(doc_dir: Path, doc_id: str) -> None:
     finally:
         with _lock:
             _pending.discard(doc_id)
+
+
+def _schedule_compiler() -> None:
+    """Schedule a compiler run with debounce — resets timer on each call."""
+    global _compiler_timer
+    with _compiler_lock:
+        if _compiler_timer is not None:
+            _compiler_timer.cancel()
+        _compiler_timer = threading.Timer(_COMPILER_DEBOUNCE_SECS, _trigger_compiler)
+        _compiler_timer.daemon = True
+        _compiler_timer.start()
+        logger.info("Compiler scheduled (debounce %ds)", _COMPILER_DEBOUNCE_SECS)
+
+
+def _trigger_compiler() -> None:
+    """Actually run the compiler agent."""
+    import asyncio
+    logger.info("Triggering compiler after new classifications...")
+    try:
+        from src.agents.compiler import run_compiler
+        from src.scheduler.notifier import notify
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(run_compiler())
+            loop.run_until_complete(notify("Compiler finished — new wiki articles generated."))
+        finally:
+            loop.close()
+    except Exception as e:
+        logger.error("Auto-compiler failed: %s", e)
