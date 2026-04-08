@@ -345,6 +345,141 @@ async def _handle_document(update: Update, context) -> None:
         await update.message.reply_text(f"Error processing document: {e}")
 
 
+async def _handle_photo(update: Update, context) -> None:
+    """Handle photo messages — ingest via image converter."""
+    chat_id = update.effective_chat.id
+    if TELEGRAM_CHAT_ID and str(chat_id) != str(TELEGRAM_CHAT_ID):
+        return
+
+    photos = update.message.photo
+    if not photos:
+        return
+
+    # Get the largest photo (last in the list)
+    photo = photos[-1]
+    filename = f"photo_{photo.file_unique_id}.jpg"
+    await update.message.reply_text("Processing photo...")
+
+    try:
+        file = await context.bot.get_file(photo.file_id)
+        tmp_path = Path(f"/tmp/pagefly_{filename}")
+        await file.download_to_drive(str(tmp_path))
+
+        doc_id = _ingest_file(str(tmp_path), filename)
+        if doc_id:
+            await update.message.reply_text(f"Ingested photo: {doc_id[:8]}")
+        else:
+            await update.message.reply_text("Failed to ingest photo")
+
+        tmp_path.unlink(missing_ok=True)
+    except Exception as e:
+        logger.error("Photo ingest error: %s", e)
+        await update.message.reply_text(f"Error processing photo: {e}")
+
+
+async def _handle_voice(update: Update, context) -> None:
+    """Handle voice messages — ingest via voice converter."""
+    chat_id = update.effective_chat.id
+    if TELEGRAM_CHAT_ID and str(chat_id) != str(TELEGRAM_CHAT_ID):
+        return
+
+    voice = update.message.voice
+    if not voice:
+        return
+
+    filename = f"voice_{voice.file_unique_id}.ogg"
+    await update.message.reply_text("Transcribing voice message...")
+
+    try:
+        file = await context.bot.get_file(voice.file_id)
+        tmp_path = Path(f"/tmp/pagefly_{filename}")
+        await file.download_to_drive(str(tmp_path))
+
+        doc_id = _ingest_file(str(tmp_path), filename)
+        if doc_id:
+            await update.message.reply_text(f"Voice transcribed and ingested: {doc_id[:8]}")
+        else:
+            await update.message.reply_text("Failed to transcribe voice message")
+
+        tmp_path.unlink(missing_ok=True)
+    except Exception as e:
+        logger.error("Voice ingest error: %s", e)
+        await update.message.reply_text(f"Error processing voice: {e}")
+
+
+async def _handle_audio(update: Update, context) -> None:
+    """Handle audio file messages — ingest via voice converter."""
+    chat_id = update.effective_chat.id
+    if TELEGRAM_CHAT_ID and str(chat_id) != str(TELEGRAM_CHAT_ID):
+        return
+
+    audio = update.message.audio
+    if not audio:
+        return
+
+    filename = audio.file_name or f"audio_{audio.file_unique_id}.mp3"
+    await update.message.reply_text(f"Transcribing: {filename}...")
+
+    try:
+        file = await context.bot.get_file(audio.file_id)
+        tmp_path = Path(f"/tmp/pagefly_{filename}")
+        await file.download_to_drive(str(tmp_path))
+
+        doc_id = _ingest_file(str(tmp_path), filename)
+        if doc_id:
+            await update.message.reply_text(f"Audio transcribed and ingested: {doc_id[:8]}")
+        else:
+            await update.message.reply_text(f"Failed to transcribe: {filename}")
+
+        tmp_path.unlink(missing_ok=True)
+    except Exception as e:
+        logger.error("Audio ingest error: %s", e)
+        await update.message.reply_text(f"Error processing audio: {e}")
+
+
+async def _handle_video(update: Update, context) -> None:
+    """Handle video messages — download and ingest (audio track transcription)."""
+    chat_id = update.effective_chat.id
+    if TELEGRAM_CHAT_ID and str(chat_id) != str(TELEGRAM_CHAT_ID):
+        return
+
+    video = update.message.video or update.message.video_note
+    if not video:
+        return
+
+    filename = getattr(video, "file_name", None) or f"video_{video.file_unique_id}.mp4"
+    await update.message.reply_text(f"Processing video: {filename}...")
+
+    try:
+        file = await context.bot.get_file(video.file_id)
+        tmp_path = Path(f"/tmp/pagefly_{filename}")
+        await file.download_to_drive(str(tmp_path))
+
+        doc_id = _ingest_file(str(tmp_path), filename)
+        if doc_id:
+            await update.message.reply_text(f"Video ingested: {doc_id[:8]}")
+        else:
+            await update.message.reply_text(f"Failed to process video: {filename}")
+
+        tmp_path.unlink(missing_ok=True)
+    except Exception as e:
+        logger.error("Video ingest error: %s", e)
+        await update.message.reply_text(f"Error processing video: {e}")
+
+
+def _ingest_file(file_path: str, original_filename: str) -> str | None:
+    """Common ingest logic for all media types."""
+    from src.ingest.pipeline import ingest
+    from src.shared.types import IngestInput
+
+    input_data = IngestInput(
+        type="file",
+        file_path=file_path,
+        original_filename=original_filename,
+    )
+    return ingest(input_data)
+
+
 async def _save_daily_chat(context) -> None:
     """Scheduled job: archive today's chat as a knowledge document."""
     from src.ingest.metadata import generate_id, now_iso, write_metadata
@@ -495,8 +630,12 @@ def run_bot() -> None:
 
     # Document uploads
     app.add_handler(MessageHandler(filters.Document.ALL, _handle_document))
+    app.add_handler(MessageHandler(filters.PHOTO, _handle_photo))
+    app.add_handler(MessageHandler(filters.VOICE, _handle_voice))
+    app.add_handler(MessageHandler(filters.AUDIO, _handle_audio))
+    app.add_handler(MessageHandler(filters.VIDEO | filters.VIDEO_NOTE, _handle_video))
 
-    # Text messages
+    # Text messages (must be last — catch-all)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, _handle_message))
 
     # Daily chat archive job at 23:55
@@ -533,6 +672,10 @@ async def start_bot() -> Application:
     app.add_handler(CommandHandler("search", _cmd_search))
     app.add_handler(CallbackQueryHandler(_handle_callback))
     app.add_handler(MessageHandler(filters.Document.ALL, _handle_document))
+    app.add_handler(MessageHandler(filters.PHOTO, _handle_photo))
+    app.add_handler(MessageHandler(filters.VOICE, _handle_voice))
+    app.add_handler(MessageHandler(filters.AUDIO, _handle_audio))
+    app.add_handler(MessageHandler(filters.VIDEO | filters.VIDEO_NOTE, _handle_video))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, _handle_message))
 
     job_queue = app.job_queue
