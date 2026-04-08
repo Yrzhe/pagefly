@@ -569,75 +569,51 @@ async def update_document_content(args):
 
 @tool(
     "create_knowledge_doc",
-    "Create a new document in knowledge/. Provide: title, content (markdown), category, tags.",
-    {"title": str, "content": str, "category": str, "tags": list},
+    (
+        "Create a new document via the ingest pipeline. The document goes through "
+        "classification and auto-compilation. Provide: title, content (markdown), tags."
+    ),
+    {"title": str, "content": str, "tags": list},
 )
 async def create_knowledge_doc(args):
-    """Create a new knowledge document."""
-    from src.ingest.metadata import generate_id, now_iso, write_metadata
-    from src.storage import db
-    from src.storage.files import create_file
+    """Create a new knowledge document via the ingest pipeline."""
+    import tempfile
+    from src.ingest.pipeline import ingest
+    from src.shared.types import IngestInput
 
     title = args["title"]
     content = args["content"]
-    category = args.get("category", "notes")
     tags = args.get("tags", [])
 
-    doc_id = generate_id()
-    timestamp = now_iso()
-    sanitized = "".join(c for c in title if c not in r'\/:*?"<>|')[:60].strip()
-    folder_name = f"{sanitized}_{doc_id[:8]}"
+    # Write content to a temp file and ingest through the normal pipeline
+    # This ensures: raw/ → classifier → knowledge/ → compiler
+    sanitized = "".join(c for c in title if c not in r'\/:*?"<>|')[:60].strip() or "untitled"
+    tmp_dir = tempfile.mkdtemp(prefix="pagefly_agent_")
+    tmp_path = Path(tmp_dir) / f"{sanitized}.md"
 
-    doc_dir = KNOWLEDGE_DIR / category / folder_name
-    create_file(doc_dir / "document.md", content)
+    # Prepend title as H1 if not already present
+    if not content.startswith("# "):
+        content = f"# {title}\n\n{content}"
 
-    metadata = {
-        "id": doc_id,
-        "title": title,
-        "description": "",
-        "source_type": "agent",
-        "original_filename": "",
-        "ingested_at": timestamp,
-        "status": "classified",
-        "location": str(doc_dir.relative_to(doc_dir.parents[2])),
-        "tags": tags,
-        "category": category,
-        "subcategory": "",
-        "references": [],
-    }
-    write_metadata(doc_dir, metadata)
+    tmp_path.write_text(content, encoding="utf-8")
 
     try:
-        with db.transaction() as conn:
-            conn.execute(
-                """INSERT INTO documents (id, title, source_type, original_filename, current_path, ingested_at)
-                VALUES (?, ?, ?, ?, ?, ?)""",
-                (doc_id, title, "agent", "", str(doc_dir), timestamp),
-            )
-            conn.execute(
-                "UPDATE documents SET status=?, category=?, tags=? WHERE id=?",
-                ("classified", category, json.dumps(tags, ensure_ascii=False), doc_id),
-            )
-            conn.execute(
-                """INSERT INTO operations_log (document_id, operation, from_path, to_path, details_json, created_at)
-                VALUES (?, ?, ?, ?, ?, ?)""",
-                (doc_id, "ingest", "", str(doc_dir), "{}", db.now_iso()),
-            )
-    except Exception as e:
-        import shutil
-        if doc_dir.exists():
-            shutil.rmtree(doc_dir, ignore_errors=True)
-        logger.error("DB insert failed, rolled back knowledge doc: %s", e)
-        return {"content": [{"type": "text", "text": f"Error: DB write failed: {e}"}]}
+        input_data = IngestInput(
+            type="file",
+            file_path=str(tmp_path),
+            original_filename=f"{sanitized}.md",
+        )
+        doc_id = ingest(input_data)
+    finally:
+        tmp_path.unlink(missing_ok=True)
+        Path(tmp_dir).rmdir()
 
-    # Light integrity check
-    from src.shared.integrity import check_document
-    integrity = check_document(doc_dir)
-    if not integrity.ok:
-        logger.warning("Integrity issues after create: %s", integrity.summary())
+    if doc_id:
+        logger.info("Knowledge doc created via pipeline: %s (%s)", title, doc_id[:8])
+        return {"content": [{"type": "text", "text": f"Created: {title} (id={doc_id[:8]}). Will be auto-classified and compiled."}]}
+    else:
+        return {"content": [{"type": "text", "text": f"Error: failed to ingest document '{title}'"}]}
 
-    logger.info("Knowledge doc created: %s (%s)", title, category)
-    return {"content": [{"type": "text", "text": f"Created: {doc_dir} (id={doc_id[:8]})"}]}
 
 
 def _collect_source_titles(source_ids: list[str]) -> list[str]:
