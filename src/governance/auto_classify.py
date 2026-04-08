@@ -94,13 +94,16 @@ def _trigger_compiler() -> None:
     logger.info("Triggering compiler after new classifications...")
     try:
         from src.agents.compiler import run_compiler
-        from src.scheduler.notifier import notify
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+        # Try to use the running event loop (main thread), fall back to new loop
         try:
-            loop.run_until_complete(run_compiler())
-            loop.run_until_complete(notify("Compiler finished — new wiki articles generated."))
-        finally:
-            loop.close()
+            loop = asyncio.get_running_loop()
+            asyncio.run_coroutine_threadsafe(run_compiler(), loop)
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            try:
+                loop.run_until_complete(run_compiler())
+            finally:
+                loop.close()
+        logger.info("Compiler triggered successfully")
     except Exception as e:
         logger.error("Auto-compiler failed: %s", e)
