@@ -34,6 +34,20 @@ def _safe_doc_path(raw_path: str) -> Path:
 security = HTTPBearer(auto_error=False)
 
 
+# ── Health check (no auth required) ──
+
+@app.get("/health")
+async def health_check():
+    """Health check for Docker / load balancer."""
+    try:
+        conn = db.get_connection()
+        conn.execute("SELECT 1")
+        conn.close()
+        return {"status": "ok"}
+    except Exception as e:
+        return JSONResponse(status_code=503, content={"status": "error", "detail": str(e)})
+
+
 # ── Help (no auth required) ──
 
 @app.get("/")

@@ -513,5 +513,53 @@ def run_bot() -> None:
     app.run_polling(drop_pending_updates=True)
 
 
+async def start_bot() -> Application:
+    """Initialize and start the Telegram bot (non-blocking, for integration with other async services)."""
+    global _app
+
+    if not TELEGRAM_BOT_TOKEN or TELEGRAM_BOT_TOKEN == "xxx":
+        raise ValueError("TELEGRAM_BOT_TOKEN not configured in config.json")
+
+    init_db()
+    app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+    _app = app
+
+    set_send_approval_callback(_send_approval_to_telegram)
+    app.post_init = _post_init
+
+    app.add_handler(CommandHandler("start", _cmd_start))
+    app.add_handler(CommandHandler("reset", _cmd_reset))
+    app.add_handler(CommandHandler("status", _cmd_status))
+    app.add_handler(CommandHandler("search", _cmd_search))
+    app.add_handler(CallbackQueryHandler(_handle_callback))
+    app.add_handler(MessageHandler(filters.Document.ALL, _handle_document))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, _handle_message))
+
+    job_queue = app.job_queue
+    if job_queue:
+        job_queue.run_daily(
+            _save_daily_chat,
+            time=datetime.strptime("23:55", "%H:%M").time(),
+            name="daily_chat_archive",
+        )
+        logger.info("Daily chat archive job scheduled at 23:55")
+
+    await app.initialize()
+    await app.start()
+    await app.updater.start_polling(drop_pending_updates=True)
+    logger.info("Telegram bot started (async)")
+    return app
+
+
+async def stop_bot() -> None:
+    """Stop the Telegram bot gracefully."""
+    if _app is None:
+        return
+    await _app.updater.stop()
+    await _app.stop()
+    await _app.shutdown()
+    logger.info("Telegram bot stopped")
+
+
 if __name__ == "__main__":
     run_bot()

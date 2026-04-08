@@ -1,8 +1,23 @@
 services:
   pagefly:
     build: .
+    container_name: pagefly
     env_file: .env
     volumes:
       - ./data:/app/data
       - ./config:/app/config
+      - ./config.json:/app/config.json:ro
+    ports:
+      - "${API_PORT:-8000}:8000"
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
