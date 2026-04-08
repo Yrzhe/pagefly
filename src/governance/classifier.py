@@ -22,8 +22,14 @@ CLASSIFICATION_SCHEMA = {
         "tags": {"type": "array", "items": {"type": "string"}},
         "confidence": {"type": "number"},
         "reasoning": {"type": "string"},
+        "relevance_score": {"type": "integer", "description": "Personal value to user, 1-10"},
+        "temporal_type": {"type": "string", "enum": ["evergreen", "time_sensitive"]},
+        "key_claims": {"type": "array", "items": {"type": "string"}, "description": "Core assertions, max 5"},
     },
-    "required": ["category", "title", "description", "tags", "confidence", "reasoning"],
+    "required": [
+        "category", "title", "description", "tags", "confidence", "reasoning",
+        "relevance_score", "temporal_type", "key_claims",
+    ],
     "additionalProperties": False,
 }
 
@@ -77,9 +83,16 @@ def classify(content: str, max_chars: int = 2000) -> ClassificationResult:
                 if cat_def and subcategory not in cat_def.get("subcategories", []):
                     subcategory = ""
 
+            relevance = max(1, min(10, int(result.get("relevance_score", 5))))
+            temporal = result.get("temporal_type", "evergreen")
+            if temporal not in ("evergreen", "time_sensitive"):
+                temporal = "evergreen"
+            key_claims = result.get("key_claims", [])[:5]
+
             logger.info(
-                "Classified (attempt %d): %s/%s (confidence=%.2f)",
+                "Classified (attempt %d): %s/%s (confidence=%.2f, relevance=%d, %s)",
                 attempt, result["category"], subcategory, result["confidence"],
+                relevance, temporal,
             )
             return ClassificationResult(
                 category=result["category"],
@@ -89,6 +102,9 @@ def classify(content: str, max_chars: int = 2000) -> ClassificationResult:
                 tags=result.get("tags", []),
                 confidence=result["confidence"],
                 reasoning=result.get("reasoning", ""),
+                relevance_score=relevance,
+                temporal_type=temporal,
+                key_claims=key_claims,
             )
 
         logger.warning(

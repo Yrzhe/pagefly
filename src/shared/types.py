@@ -39,6 +39,9 @@ class ClassificationResult:
     tags: list[str]
     confidence: float
     reasoning: str
+    relevance_score: int = 5  # 1-10, personal value to user
+    temporal_type: str = "evergreen"  # evergreen | time_sensitive
+    key_claims: list[str] = field(default_factory=list)  # core assertions, max 5
 
 
 @dataclass

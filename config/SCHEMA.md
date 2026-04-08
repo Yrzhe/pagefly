@@ -51,6 +51,11 @@ knowledge/{category}/{subcategory?}/{title}_{id[:8]}/
 - `category`: One of the category IDs above
 - `tags`: Array of strings
 
+### Distillation Fields (set by classifier)
+- `relevance_score`: 1-10 personal value (1-3 low, 4-6 mid, 7-9 high, 10 critical)
+- `temporal_type`: `evergreen` (long-lived knowledge) | `time_sensitive` (news, market data)
+- `key_claims`: Array of core assertions (max 5), e.g. ["Transformer允许O(1)并行计算"]
+
 ## Wiki Articles
 
 ### Structure

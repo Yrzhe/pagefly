@@ -94,6 +94,9 @@ def _process_entry(doc_dir: Path) -> str | None:
             "status": new_status,
             "location": relative_location,
             "classified_at": now_iso(),
+            "relevance_score": result.relevance_score,
+            "temporal_type": result.temporal_type,
+            "key_claims": result.key_claims,
         })
 
         classified_ts = now_iso()
@@ -130,10 +133,11 @@ def _process_entry(doc_dir: Path) -> str | None:
 
     # Activity log
     from src.shared.activity_log import append_log
+    claims_str = "; ".join(result.key_claims[:3]) if result.key_claims else "none"
     append_log(
         "classify",
         f"{result.title}",
-        f"→ {relative_location} (confidence={result.confidence:.2f}, {new_status})",
+        f"→ {relative_location} (confidence={result.confidence:.2f}, relevance={result.relevance_score}/10, {result.temporal_type})\nKey claims: {claims_str}",
     )
 
     logger.info(
