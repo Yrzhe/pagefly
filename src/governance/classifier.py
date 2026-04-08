@@ -75,13 +75,11 @@ def classify(content: str, max_chars: int = 2000) -> ClassificationResult:
 
         if result["category"] in valid_ids:
             subcategory = result.get("subcategory", "")
+            # Allow classifier to propose new subcategories — don't force empty
+            # Just sanitize: lowercase, hyphens, no special chars
             if subcategory:
-                cat_def = next(
-                    (c for c in categories_data["categories"] if c["id"] == result["category"]),
-                    None,
-                )
-                if cat_def and subcategory not in cat_def.get("subcategories", []):
-                    subcategory = ""
+                subcategory = subcategory.strip().lower().replace(" ", "-")
+                subcategory = "".join(c for c in subcategory if c.isalnum() or c == "-")
 
             relevance = max(1, min(10, int(result.get("relevance_score", 5))))
             temporal = result.get("temporal_type", "evergreen")

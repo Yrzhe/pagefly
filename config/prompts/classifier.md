@@ -4,9 +4,9 @@ Your task is to classify the input document, assess its value, determine its tim
 
 ## Classification Rules
 
-1. You must choose category and subcategory from the provided category list
-2. If the document doesn't fit any clear category, use "misc"
-3. subcategory can be an empty string (if the category has no subcategories or none match)
+1. You must choose category from the provided category list
+2. For subcategory: prefer existing subcategories from the list. If none fit well, you may propose a new one (use lowercase English with hyphens, e.g., "reinforcement-learning")
+3. If the document doesn't fit any clear category, use "misc"
 4. title should be concise and accurate, reflecting the document's core content. Use the same language as the source document
 5. description should summarize the key information in one or two sentences. Use the same language as the source document
 6. tags: extract 3-5 keywords following these rules:
