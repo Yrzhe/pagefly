@@ -58,34 +58,42 @@ def fetch_via_buc(url: str, task_instruction: str = "") -> dict:
     Requires: browser-use-sdk, playwright.
     """
     import asyncio
-    return asyncio.run(_buc_fetch_async(url))
+    try:
+        asyncio.get_running_loop()
+        # Already in async context — use nest_asyncio or thread
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(lambda: asyncio.run(_buc_fetch_async(url)))
+            return future.result(timeout=60)
+    except RuntimeError:
+        return asyncio.run(_buc_fetch_async(url))
 
 
 # ── BUC internals ──
 
+import threading
 _buc_api_key: str = ""  # In-memory key, auto-registered
+_buc_lock = threading.Lock()
 
 
 def _get_buc_key() -> str:
-    """Get or auto-register a BUC API key."""
+    """Get or auto-register a BUC API key. Thread-safe."""
     global _buc_api_key
     import os
     from src.shared.config import _cfg
 
-    # Try config first
-    if not _buc_api_key:
-        buc_config = _cfg.get("api_keys", {}).get("browser_use_cloud", {})
-        _buc_api_key = buc_config.get("api_key", "")
+    with _buc_lock:
+        if not _buc_api_key:
+            buc_config = _cfg.get("api_keys", {}).get("browser_use_cloud", {})
+            _buc_api_key = buc_config.get("api_key", "")
 
-    # Try env var
-    if not _buc_api_key or _buc_api_key in ("xxx", "bu_xxx", ""):
-        _buc_api_key = os.environ.get("BROWSER_USE_API_KEY", "")
+        if not _buc_api_key or _buc_api_key in ("xxx", "bu_xxx", ""):
+            _buc_api_key = os.environ.get("BROWSER_USE_API_KEY", "")
 
-    # Auto-register if still no key
-    if not _buc_api_key:
-        _buc_api_key = _auto_register_buc_key()
+        if not _buc_api_key:
+            _buc_api_key = _auto_register_buc_key()
 
-    return _buc_api_key
+        return _buc_api_key
 
 
 def _auto_register_buc_key() -> str:
@@ -128,14 +136,17 @@ def _auto_register_buc_key() -> str:
     cleaned = "".join(" " if c in noise else c for c in cleaned)
     cleaned = " ".join(cleaned.split())
 
-    # Try to eval the math expression
-    # Extract numbers and operators
+    # Safe math evaluation (no eval — only ast.literal_eval + operator map)
+    import ast
+    import operator
     import re
+
     expr = re.sub(r'[^0-9+\-*/. ]', '', cleaned).strip()
     try:
-        answer = f"{eval(expr):.2f}"
+        # Parse as AST and evaluate safely
+        answer = f"{_safe_math_eval(expr):.2f}"
     except Exception:
-        logger.error("Could not solve BUC challenge: %s → %s", raw_text, cleaned)
+        logger.error("Could not solve BUC challenge: %s → %s → %s", raw_text, cleaned, expr)
         raise RuntimeError(f"Cannot solve BUC math challenge: {cleaned}")
 
     # Step 3: Verify
@@ -153,6 +164,31 @@ def _auto_register_buc_key() -> str:
 
     logger.info("BUC key auto-registered: %s...", new_key[:12])
     return new_key
+
+
+def _safe_math_eval(expr: str) -> float:
+    """Safely evaluate a simple math expression (no eval)."""
+    import ast
+    import operator
+
+    ops = {
+        ast.Add: operator.add,
+        ast.Sub: operator.sub,
+        ast.Mult: operator.mul,
+        ast.Div: operator.truediv,
+    }
+
+    def _eval(node):
+        if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+            return node.value
+        if isinstance(node, ast.BinOp) and type(node.op) in ops:
+            return ops[type(node.op)](_eval(node.left), _eval(node.right))
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
+            return -_eval(node.operand)
+        raise ValueError(f"Unsupported: {ast.dump(node)}")
+
+    tree = ast.parse(expr, mode="eval")
+    return float(_eval(tree.body))
 
 
 async def _buc_fetch_async(url: str) -> dict:
@@ -174,10 +210,10 @@ async def _buc_fetch_async(url: str) -> dict:
         )
     except Exception as e:
         if "402" in str(e) or "credits" in str(e).lower():
-            # Credits exhausted — auto-register new key
             global _buc_api_key
             logger.info("BUC credits exhausted, registering new key...")
-            _buc_api_key = _auto_register_buc_key()
+            with _buc_lock:
+                _buc_api_key = _auto_register_buc_key()
             os.environ["BROWSER_USE_API_KEY"] = _buc_api_key
             client = AsyncBrowserUse()
             browser = await client.browsers.create(
@@ -187,6 +223,7 @@ async def _buc_fetch_async(url: str) -> dict:
         else:
             raise
 
+    browser_id = browser.id
     try:
         async with async_playwright() as p:
             pw_browser = await p.chromium.connect_over_cdp(browser.cdp_url)
@@ -198,8 +235,11 @@ async def _buc_fetch_async(url: str) -> dict:
 
             await pw_browser.close()
     finally:
-        stopped = await client.browsers.stop(browser.id)
-        logger.info("BUC session cost: $%s", stopped.browser_cost)
+        try:
+            stopped = await client.browsers.stop(browser_id)
+            logger.info("BUC session cost: $%s", stopped.browser_cost)
+        except Exception:
+            pass
 
     return {
         "title": title,
