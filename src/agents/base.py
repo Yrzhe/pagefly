@@ -933,6 +933,56 @@ async def list_prompts(args):
     return {"content": [{"type": "text", "text": json.dumps(result, ensure_ascii=False, indent=2)}]}
 
 
+# ── URL fetch tools ──
+
+
+@tool(
+    "fetch_url",
+    (
+        "Fetch a web page and return its content as markdown. "
+        "Uses httpx + readability (fast, works for static pages). "
+        "Returns the page title, markdown content, and character count. "
+        "You decide what to do with the result: save to workspace, move to raw, or discard. "
+        "If the content is too short or empty, try fetch_url_browser instead."
+    ),
+    {"url": str},
+)
+async def fetch_url_tool(args):
+    """Fetch URL content via httpx + readability."""
+    from src.ingest.converters.url import fetch_simple
+
+    url = args["url"]
+    try:
+        result = fetch_simple(url)
+        return {"content": [{"type": "text", "text": json.dumps(result, ensure_ascii=False)}]}
+    except Exception as e:
+        return {"content": [{"type": "text", "text": f"Fetch failed: {e}. Try fetch_url_browser for JS-heavy pages."}]}
+
+
+@tool(
+    "fetch_url_browser",
+    (
+        "Fetch a web page using Browser Use Cloud (headless browser). "
+        "Use this for JS-rendered pages, SPAs, or pages that fetch_url couldn't handle. "
+        "You can provide a custom task_instruction to tell the browser what to extract. "
+        "Requires browser_use_cloud API key in config. "
+        "Returns the page content as markdown."
+    ),
+    {"url": str, "task_instruction": str},
+)
+async def fetch_url_browser_tool(args):
+    """Fetch URL content via Browser Use Cloud."""
+    from src.ingest.converters.url import fetch_via_buc
+
+    url = args["url"]
+    task_instruction = args.get("task_instruction", "")
+    try:
+        result = fetch_via_buc(url, task_instruction)
+        return {"content": [{"type": "text", "text": json.dumps(result, ensure_ascii=False)}]}
+    except Exception as e:
+        return {"content": [{"type": "text", "text": f"Browser fetch failed: {e}"}]}
+
+
 # ── Deletion tools ──
 
 
@@ -1187,6 +1237,8 @@ def build_knowledge_tools_server():
             delete_schedule,
             save_prompt,
             list_prompts,
+            fetch_url_tool,
+            fetch_url_browser_tool,
             preview_delete_document,
             delete_document,
             write_workspace_file,
@@ -1250,6 +1302,8 @@ def build_agent_options(
             "mcp__pagefly__delete_schedule",
             "mcp__pagefly__save_prompt",
             "mcp__pagefly__list_prompts",
+            "mcp__pagefly__fetch_url",
+            "mcp__pagefly__fetch_url_browser",
             "mcp__pagefly__preview_delete_document",
             "mcp__pagefly__delete_document",
             "mcp__pagefly__write_workspace_file",
