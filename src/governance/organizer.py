@@ -77,41 +77,56 @@ def _process_entry(doc_dir: Path) -> str | None:
         new_status = "needs_review"
 
     target_path = target_parent / doc_dir.name
-    move_directory(doc_dir, target_path)
 
-    relative_location = str(target_path.relative_to(target_path.parents[2]))
-    update_metadata(target_path, {
-        "title": result.title,
-        "description": result.description,
-        "tags": result.tags,
-        "category": result.category,
-        "subcategory": result.subcategory,
-        "status": new_status,
-        "location": relative_location,
-        "classified_at": now_iso(),
-    })
+    # Atomic-ish organize: move → update metadata → update DB
+    # Rollback: move back to original location on failure
+    relative_location = str(target_path)
+    try:
+        move_directory(doc_dir, target_path)
 
-    db.update_document(
-        doc_id,
-        title=result.title,
-        description=result.description,
-        current_path=str(target_path),
-        status=new_status,
-        category=result.category,
-        subcategory=result.subcategory,
-        tags=json.dumps(result.tags, ensure_ascii=False),
-        classified_at=now_iso(),
-    )
-    db.log_operation(
-        doc_id,
-        operation="classify",
-        from_path=str(doc_dir),
-        to_path=str(target_path),
-        details_json=json.dumps({
-            "confidence": result.confidence,
-            "reasoning": result.reasoning,
-        }, ensure_ascii=False),
-    )
+        relative_location = str(target_path.relative_to(target_path.parents[2]))
+        update_metadata(target_path, {
+            "title": result.title,
+            "description": result.description,
+            "tags": result.tags,
+            "category": result.category,
+            "subcategory": result.subcategory,
+            "status": new_status,
+            "location": relative_location,
+            "classified_at": now_iso(),
+        })
+
+        db.update_document(
+            doc_id,
+            title=result.title,
+            description=result.description,
+            current_path=str(target_path),
+            status=new_status,
+            category=result.category,
+            subcategory=result.subcategory,
+            tags=json.dumps(result.tags, ensure_ascii=False),
+            classified_at=now_iso(),
+        )
+        db.log_operation(
+            doc_id,
+            operation="classify",
+            from_path=str(doc_dir),
+            to_path=str(target_path),
+            details_json=json.dumps({
+                "confidence": result.confidence,
+                "reasoning": result.reasoning,
+            }, ensure_ascii=False),
+        )
+    except Exception as e:
+        # Rollback: move back to original location
+        if target_path.exists() and not doc_dir.exists():
+            try:
+                move_directory(target_path, doc_dir)
+                logger.warning("Rolled back move: %s → %s", target_path.name, doc_dir)
+            except Exception:
+                logger.error("Rollback also failed for %s", doc_id[:8])
+        logger.error("Organize failed for %s: %s", doc_id[:8], e)
+        return None
 
     # Activity log
     from src.shared.activity_log import append_log

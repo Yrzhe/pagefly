@@ -24,15 +24,34 @@ from src.storage.db import init_db
 
 logger = get_logger("channels.telegram")
 
-# Per-chat sessions for multi-turn conversations
-_sessions: dict[int, QuerySession] = {}
+# Per-chat sessions for multi-turn conversations (with timestamps for TTL)
+_sessions: dict[int, tuple[QuerySession, float]] = {}
+_MAX_SESSIONS = 100
+_SESSION_TTL = 3600  # 1 hour
 
 
 def _get_session(chat_id: int) -> QuerySession:
-    """Get or create a session for a chat."""
+    """Get or create a session for a chat. Evicts expired/excess sessions."""
+    now = datetime.now(timezone.utc).timestamp()
+
+    # Evict expired sessions
+    expired = [cid for cid, (_, ts) in _sessions.items() if now - ts > _SESSION_TTL]
+    for cid in expired:
+        del _sessions[cid]
+
+    # Evict oldest if over limit
+    if len(_sessions) >= _MAX_SESSIONS and chat_id not in _sessions:
+        oldest = min(_sessions, key=lambda k: _sessions[k][1])
+        del _sessions[oldest]
+
     if chat_id not in _sessions:
-        _sessions[chat_id] = QuerySession()
-    return _sessions[chat_id]
+        _sessions[chat_id] = (QuerySession(), now)
+    else:
+        # Update last access time
+        session, _ = _sessions[chat_id]
+        _sessions[chat_id] = (session, now)
+
+    return _sessions[chat_id][0]
 
 
 def _escape_md(text: str) -> str:

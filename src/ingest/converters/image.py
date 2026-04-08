@@ -33,7 +33,8 @@ def _get_client() -> Mistral:
 
 def can_handle(input_data: IngestInput) -> bool:
     if input_data.type == "file" and input_data.file_path:
-        return Path(input_data.file_path).suffix.lower() in IMAGE_EXTENSIONS
+        p = Path(input_data.file_path)
+        return p.exists() and p.suffix.lower() in IMAGE_EXTENSIONS
     return False
 
 

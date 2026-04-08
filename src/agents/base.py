@@ -291,6 +291,8 @@ async def write_wiki_article(args):
         old_refs = existing_meta.get("references", [])
         ref_keys = {(r["target_id"], r["relation"]) for r in valid_refs}
         for old_ref in old_refs:
+            if not isinstance(old_ref, dict):
+                continue
             key = (old_ref.get("target_id", ""), old_ref.get("relation", ""))
             if key not in ref_keys:
                 valid_refs.append(old_ref)
@@ -612,7 +614,8 @@ def _collect_source_titles(source_ids: list[str]) -> list[str]:
 
 
 def _find_doc_dir_by_id(doc_id: str) -> Path | None:
-    """Find a document folder by its ID across knowledge/ and wiki/."""
+    """Find a document folder by its ID across knowledge/ and wiki/.
+    Validates that the returned path is actually under a safe root directory."""
     for root_dir in (KNOWLEDGE_DIR, WIKI_DIR):
         if not root_dir.exists():
             continue
@@ -620,6 +623,10 @@ def _find_doc_dir_by_id(doc_id: str) -> Path | None:
             try:
                 meta = json.loads(meta_path.read_text(encoding="utf-8"))
                 if meta.get("id") == doc_id:
+                    resolved = meta_path.parent.resolve()
+                    if not resolved.is_relative_to(root_dir.resolve()):
+                        logger.warning("Path traversal blocked: %s", resolved)
+                        continue
                     return meta_path.parent
             except Exception:
                 pass
@@ -714,6 +721,16 @@ async def add_schedule(args):
     parts = cron_expr.strip().split()
     if len(parts) != 5:
         return {"content": [{"type": "text", "text": f"Error: invalid cron expression '{cron_expr}'. Must have 5 fields."}]}
+
+    # Validate with APScheduler to catch bad values early
+    try:
+        from apscheduler.triggers.cron import CronTrigger
+        CronTrigger(
+            minute=parts[0], hour=parts[1], day=parts[2],
+            month=parts[3], day_of_week=parts[4],
+        )
+    except Exception as e:
+        return {"content": [{"type": "text", "text": f"Error: invalid cron expression '{cron_expr}': {e}"}]}
 
     db.insert_scheduled_task(task_id, name, cron_expr, task_type, prompt)
     logger.info("Schedule added: %s (%s) -> %s", name, cron_expr, task_type)

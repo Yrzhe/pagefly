@@ -25,7 +25,8 @@ def _get_client() -> Mistral:
 def can_handle(input_data: IngestInput) -> bool:
     """Check if this converter can handle the input."""
     if input_data.type == "file" and input_data.file_path:
-        return Path(input_data.file_path).suffix.lower() == ".pdf"
+        p = Path(input_data.file_path)
+        return p.exists() and p.suffix.lower() == ".pdf"
     return False
 
 

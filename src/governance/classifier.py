@@ -45,6 +45,7 @@ def classify(content: str, max_chars: int = 2000) -> ClassificationResult:
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY, base_url=ANTHROPIC_BASE_URL)
     valid_ids = {c["id"] for c in categories_data["categories"]}
 
+    last_result: dict = {}
     for attempt in range(1, MAX_RETRIES + 1):
         response = client.messages.create(
             model=CLASSIFIER_MODEL,
@@ -64,6 +65,7 @@ def classify(content: str, max_chars: int = 2000) -> ClassificationResult:
 
         text = next((b.text for b in response.content if b.type == "text"), "")
         result = json.loads(text)
+        last_result = result
 
         if result["category"] in valid_ids:
             subcategory = result.get("subcategory", "")
@@ -98,9 +100,9 @@ def classify(content: str, max_chars: int = 2000) -> ClassificationResult:
     return ClassificationResult(
         category="misc",
         subcategory="",
-        title=result.get("title", ""),
-        description=result.get("description", ""),
-        tags=result.get("tags", []),
+        title=last_result.get("title", ""),
+        description=last_result.get("description", ""),
+        tags=last_result.get("tags", []),
         confidence=0.0,
         reasoning="Classification failed after max retries",
     )

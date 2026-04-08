@@ -51,17 +51,27 @@ def ingest(input_data: IngestInput) -> str | None:
     folder_name = _build_folder_name(result.title, doc_id)
     metadata["title"] = result.title
     doc_dir = RAW_DIR / folder_name
-    _write_document(doc_dir, result, metadata)
 
-    db.insert_document(
-        doc_id=doc_id,
-        title=result.title,
-        source_type=source_type,
-        original_filename=input_data.original_filename,
-        current_path=str(doc_dir),
-        ingested_at=metadata["ingested_at"],
-    )
-    db.log_operation(doc_id, "ingest", to_path=str(doc_dir))
+    # Atomic-ish ingest: write files then DB, rollback files on DB failure
+    try:
+        _write_document(doc_dir, result, metadata)
+        db.insert_document(
+            doc_id=doc_id,
+            title=result.title,
+            source_type=source_type,
+            original_filename=input_data.original_filename,
+            current_path=str(doc_dir),
+            ingested_at=metadata["ingested_at"],
+        )
+        db.log_operation(doc_id, "ingest", to_path=str(doc_dir))
+    except Exception as e:
+        # Rollback: remove orphan directory if it was created
+        import shutil
+        if doc_dir.exists():
+            shutil.rmtree(doc_dir, ignore_errors=True)
+            logger.warning("Rolled back orphan directory: %s", doc_dir)
+        logger.error("Ingest failed for %s: %s", input_data.original_filename, e)
+        return None
 
     # Activity log
     from src.shared.activity_log import append_log

@@ -12,6 +12,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from src.shared.config import (
     API_MAX_UPLOAD_MB,
     API_MASTER_TOKEN,
+    DATA_DIR,
     KNOWLEDGE_DIR,
     WIKI_DIR,
 )
@@ -22,6 +23,14 @@ from src.storage import db
 logger = get_logger("channels.api")
 
 app = FastAPI(title="PageFly API", version="0.1.0")
+
+
+def _safe_doc_path(raw_path: str) -> Path:
+    """Validate and resolve a document path from DB. Raises HTTPException on traversal."""
+    doc_dir = Path(raw_path).resolve()
+    if not doc_dir.is_relative_to(DATA_DIR.resolve()):
+        raise HTTPException(status_code=403, detail="Invalid document path")
+    return doc_dir
 security = HTTPBearer(auto_error=False)
 
 
@@ -183,13 +192,22 @@ async def list_documents(
     if search:
         keyword = search.lower()
         filtered = []
+        max_search_results = 50
         for doc in docs:
-            doc_dir = Path(doc["current_path"])
-            md_path = doc_dir / "document.md"
-            if md_path.exists() and keyword in md_path.read_text(encoding="utf-8").lower():
+            if len(filtered) >= max_search_results:
+                break
+            # Check title/description first (fast, no I/O)
+            if keyword in doc.get("title", "").lower() or keyword in doc.get("description", "").lower():
                 filtered.append(doc)
-            elif keyword in doc.get("title", "").lower() or keyword in doc.get("description", "").lower():
-                filtered.append(doc)
+                continue
+            # Fall back to content search (slower, requires file read)
+            try:
+                doc_dir = _safe_doc_path(doc["current_path"])
+                md_path = doc_dir / "document.md"
+                if md_path.exists() and keyword in md_path.read_text(encoding="utf-8").lower():
+                    filtered.append(doc)
+            except Exception:
+                pass
         docs = filtered
 
     return {"total": total, "documents": docs}
@@ -202,7 +220,7 @@ async def get_document(doc_id: str):
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
-    doc_dir = Path(doc["current_path"])
+    doc_dir = _safe_doc_path(doc["current_path"])
     md_path = doc_dir / "document.md"
     meta_path = doc_dir / "metadata.json"
 
@@ -222,7 +240,7 @@ async def download_document(doc_id: str, format: str = Query(default="zip", patt
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
-    doc_dir = Path(doc["current_path"])
+    doc_dir = _safe_doc_path(doc["current_path"])
     if not doc_dir.exists():
         raise HTTPException(status_code=404, detail="Document folder not found on disk")
 

@@ -1,5 +1,6 @@
 """File packaging utilities — ZIP and PDF generation."""
 
+import atexit
 import shutil
 import tempfile
 from pathlib import Path
@@ -7,6 +8,23 @@ from pathlib import Path
 from src.shared.logger import get_logger
 
 logger = get_logger("shared.packaging")
+
+# Track temp dirs for cleanup on exit
+_temp_dirs: set[Path] = set()
+
+
+def _cleanup_all_temp() -> None:
+    """Remove all tracked temp directories on process exit."""
+    for d in list(_temp_dirs):
+        try:
+            if d.exists():
+                shutil.rmtree(d, ignore_errors=True)
+        except Exception:
+            pass
+    _temp_dirs.clear()
+
+
+atexit.register(_cleanup_all_temp)
 
 
 def zip_document(doc_dir: Path) -> Path:
@@ -18,6 +36,7 @@ def zip_document(doc_dir: Path) -> Path:
         raise FileNotFoundError(f"Document folder not found: {doc_dir}")
 
     tmp_dir = Path(tempfile.mkdtemp())
+    _temp_dirs.add(tmp_dir)
     zip_name = doc_dir.name
     zip_path = tmp_dir / zip_name
 
@@ -77,6 +96,7 @@ pre {{ background: #f5f5f5; padding: 16px; border-radius: 6px; overflow-x: auto;
 </html>"""
 
     tmp_dir = Path(tempfile.mkdtemp())
+    _temp_dirs.add(tmp_dir)
     pdf_name = title or md_path.parent.name
     pdf_name = "".join(c for c in pdf_name if c not in r'\/:*?"<>|')[:60].strip()
     pdf_path = tmp_dir / f"{pdf_name}.pdf"
