@@ -996,6 +996,37 @@ async def delete_document(args):
     return {"content": [{"type": "text", "text": result}]}
 
 
+# ── Database query tool ──
+
+@tool(
+    "query_database",
+    (
+        "Run a read-only SQL query against the PageFly database. "
+        "Tables: documents, operations_log, wiki_articles, scheduled_tasks, custom_prompts, chat_sessions. "
+        "Only SELECT queries are allowed. Returns JSON results (max 50 rows)."
+    ),
+    {"sql": str},
+)
+async def query_database(args):
+    """Run a read-only SQL query."""
+    from src.storage.db import get_connection
+
+    sql = args["sql"].strip()
+
+    # Safety: only allow SELECT
+    if not sql.upper().startswith("SELECT"):
+        return {"content": [{"type": "text", "text": "Error: only SELECT queries are allowed"}]}
+
+    try:
+        conn = get_connection()
+        rows = conn.execute(sql).fetchmany(50)
+        results = [dict(r) for r in rows]
+        conn.close()
+        return {"content": [{"type": "text", "text": json.dumps(results, ensure_ascii=False, indent=2)}]}
+    except Exception as e:
+        return {"content": [{"type": "text", "text": f"Error: {e}"}]}
+
+
 # ── Workspace tools ──
 
 from src.shared.config import WORKSPACE_DIR
@@ -1223,6 +1254,7 @@ def build_knowledge_tools_server():
             list_workspace_files,
             move_workspace_to_raw,
             promote_draft_to_wiki,
+            query_database,
         ],
     )
 
@@ -1288,6 +1320,7 @@ def build_agent_options(
             "mcp__pagefly__list_workspace_files",
             "mcp__pagefly__move_workspace_to_raw",
             "mcp__pagefly__promote_draft_to_wiki",
+            "mcp__pagefly__query_database",
         ],
         permission_mode="bypassPermissions",
         max_turns=max_turns,
