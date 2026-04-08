@@ -240,12 +240,13 @@ async def start_scheduler() -> None:
         id="wiki_lint", name="Wiki Lint",
     )
 
-    # Workspace cleanup (daily at 3:30am)
-    scheduler.add_job(
-        _cleanup_workspace,
-        trigger=CronTrigger(hour=3, minute=30),
-        id="workspace_cleanup", name="Workspace Cleanup",
-    )
+    # Workspace cleanup disabled — agent manages own files
+    # To re-enable: uncomment and set desired schedule
+    # scheduler.add_job(
+    #     _cleanup_workspace,
+    #     trigger=CronTrigger(hour=3, minute=30),
+    #     id="workspace_cleanup", name="Workspace Cleanup",
+    # )
 
     # Load user-defined tasks from database
     _load_user_tasks(scheduler)

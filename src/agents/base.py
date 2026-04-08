@@ -1038,6 +1038,98 @@ async def list_workspace_files(args):
 
 
 @tool(
+    "read_workspace_file",
+    (
+        "Read a file from the agent workspace (data/workspace/). "
+        "Provide: path (relative to workspace/, e.g. 'research/notes.md')."
+    ),
+    {"path": str},
+)
+async def read_workspace_file(args):
+    """Read a file from workspace."""
+    rel_path = args["path"]
+    if ".." in rel_path:
+        return {"content": [{"type": "text", "text": "Error: path must not contain '..'"}]}
+
+    file_path = WORKSPACE_DIR / rel_path
+    if not file_path.exists():
+        return {"content": [{"type": "text", "text": f"Error: file not found: workspace/{rel_path}"}]}
+
+    content = file_path.read_text(encoding="utf-8")
+    return {"content": [{"type": "text", "text": content}]}
+
+
+@tool(
+    "delete_workspace_file",
+    (
+        "Delete a file or folder from the agent workspace (data/workspace/). "
+        "Provide: path (relative to workspace/). Can delete files or entire folders."
+    ),
+    {"path": str},
+)
+async def delete_workspace_file(args):
+    """Delete a file or folder from workspace."""
+    import shutil
+    rel_path = args["path"]
+    if ".." in rel_path:
+        return {"content": [{"type": "text", "text": "Error: path must not contain '..'"}]}
+
+    target = WORKSPACE_DIR / rel_path
+    if not target.exists():
+        return {"content": [{"type": "text", "text": f"Error: not found: workspace/{rel_path}"}]}
+
+    if target.is_dir():
+        shutil.rmtree(target)
+        logger.info("Workspace folder deleted: %s", rel_path)
+    else:
+        target.unlink()
+        logger.info("Workspace file deleted: %s", rel_path)
+
+    return {"content": [{"type": "text", "text": f"Deleted: workspace/{rel_path}"}]}
+
+
+@tool(
+    "move_workspace_to_raw",
+    (
+        "Move a file from workspace to raw/ for proper ingest processing. "
+        "The file will go through the normal pipeline: classify → organize → knowledge/. "
+        "Provide: path (relative to workspace/), original_filename (for the ingest pipeline)."
+    ),
+    {"path": str, "original_filename": str},
+)
+async def move_workspace_to_raw(args):
+    """Move a workspace file to raw/ for ingest."""
+    rel_path = args["path"]
+    original_filename = args.get("original_filename", "")
+    if ".." in rel_path:
+        return {"content": [{"type": "text", "text": "Error: path must not contain '..'"}]}
+
+    source = WORKSPACE_DIR / rel_path
+    if not source.exists():
+        return {"content": [{"type": "text", "text": f"Error: not found: workspace/{rel_path}"}]}
+
+    # Ingest the file through the normal pipeline
+    from src.ingest.pipeline import ingest
+    from src.shared.types import IngestInput
+
+    input_data = IngestInput(
+        type="file",
+        file_path=str(source),
+        original_filename=original_filename or source.name,
+    )
+    doc_id = ingest(input_data)
+
+    if doc_id:
+        # Remove from workspace after successful ingest
+        if source.is_file():
+            source.unlink()
+        logger.info("Workspace file ingested: %s → raw/ (id=%s)", rel_path, doc_id[:8])
+        return {"content": [{"type": "text", "text": f"Ingested: {rel_path} → raw/ (id={doc_id[:8]})"}]}
+    else:
+        return {"content": [{"type": "text", "text": f"Error: ingest failed for {rel_path}"}]}
+
+
+@tool(
     "promote_draft_to_wiki",
     (
         "Promote a workspace draft to a wiki article. "
@@ -1101,7 +1193,10 @@ def build_knowledge_tools_server():
             preview_delete_document,
             delete_document,
             write_workspace_file,
+            read_workspace_file,
+            delete_workspace_file,
             list_workspace_files,
+            move_workspace_to_raw,
             promote_draft_to_wiki,
         ],
     )
@@ -1161,7 +1256,10 @@ def build_agent_options(
             "mcp__pagefly__preview_delete_document",
             "mcp__pagefly__delete_document",
             "mcp__pagefly__write_workspace_file",
+            "mcp__pagefly__read_workspace_file",
+            "mcp__pagefly__delete_workspace_file",
             "mcp__pagefly__list_workspace_files",
+            "mcp__pagefly__move_workspace_to_raw",
             "mcp__pagefly__promote_draft_to_wiki",
         ],
         permission_mode="bypassPermissions",
