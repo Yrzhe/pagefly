@@ -608,14 +608,25 @@ async def _save_daily_chat(context) -> None:
     from src.storage import db
     from src.storage.files import create_file
 
-    today = datetime.now(timezone.utc).astimezone().strftime("%Y-%m-%d")
+    now = datetime.now(timezone.utc).astimezone()
+    today = now.strftime("%Y-%m-%d")
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
 
     for chat_id, (session, _ts) in list(_sessions.items()):
         if not session.messages:
             continue
 
+        # Only archive today's messages (avoid re-archiving old ones)
+        today_msgs = [
+            m for m in session.messages
+            if m.get("ts", "") >= today_start
+        ]
+
+        if not today_msgs:
+            continue
+
         lines = []
-        for msg in session.messages:
+        for msg in today_msgs:
             role = "User" if msg["role"] == "user" else "PageFly"
             lines.append(f"**{role}**: {msg['content']}")
 
@@ -666,7 +677,7 @@ async def _save_daily_chat(context) -> None:
             logger.error("Failed to save daily chat for %s: %s", chat_id, e)
             continue
 
-        logger.info("Saved daily chat log: %s (%d messages)", today, len(session.messages))
+        logger.info("Saved daily chat log: %s (%d messages, %d today)", today, len(session.messages), len(today_msgs))
 
         # Trim to last 50 messages (keep context for tomorrow) instead of clearing
         session.messages = session.messages[-50:]

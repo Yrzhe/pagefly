@@ -46,7 +46,9 @@ async def ask(
         prompt = user_message
 
     if session is not None:
-        session.messages.append({"role": "user", "content": user_message})
+        from datetime import datetime, timezone
+        ts = datetime.now(timezone.utc).astimezone().isoformat()
+        session.messages.append({"role": "user", "content": user_message, "ts": ts})
 
     response_parts = []
 
@@ -70,7 +72,9 @@ async def ask(
     response = "\n".join(response_parts) if response_parts else "No response from agent."
 
     if session is not None:
-        session.messages.append({"role": "assistant", "content": response})
+        from datetime import datetime, timezone
+        ts = datetime.now(timezone.utc).astimezone().isoformat()
+        session.messages.append({"role": "assistant", "content": response, "ts": ts})
 
     return response
 
