@@ -7,6 +7,7 @@ from src.ingest.converters import docx as docx_converter
 from src.ingest.converters import image as image_converter
 from src.ingest.converters import pdf as pdf_converter
 from src.ingest.converters import text as text_converter
+from src.ingest.converters import voice as voice_converter
 from src.ingest.metadata import build_metadata, write_metadata
 from src.shared.config import RAW_DIR
 from src.shared.logger import get_logger
@@ -20,9 +21,9 @@ logger = get_logger("ingest.pipeline")
 CONVERTERS = [
     pdf_converter,
     docx_converter,
+    voice_converter,
     image_converter,
     text_converter,
-    # voice_converter,
 ]
 
 

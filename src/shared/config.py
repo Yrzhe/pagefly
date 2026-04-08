@@ -49,6 +49,7 @@ DATABASE_URL: str = _cfg["database"]["url"]
 # Models
 CLASSIFIER_MODEL: str = _cfg["models"]["classifier"]
 AGENT_MODEL: str = _cfg["models"]["agent"]
+TRANSCRIPTION_MODEL: str = _cfg["models"].get("transcription", "gpt-4o-transcribe")
 
 # Watcher
 _watcher = _cfg.get("watcher", {})

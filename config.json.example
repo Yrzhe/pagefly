@@ -22,7 +22,8 @@
   },
   "models": {
     "classifier": "claude-sonnet-4-6",
-    "agent": "claude-sonnet-4-6"
+    "agent": "claude-sonnet-4-6",
+    "transcription": "gpt-4o-transcribe"
   },
   "watcher": {
     "inbox_dir": "data/inbox",
