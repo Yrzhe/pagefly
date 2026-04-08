@@ -179,28 +179,20 @@ async def list_documents(
         params.append(status)
 
     where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
-    query_str = f"SELECT * FROM documents {where} ORDER BY ingested_at DESC LIMIT ? OFFSET ?"
-    params.extend([limit, offset])
 
-    rows = conn.execute(query_str, params).fetchall()
-    total = conn.execute(f"SELECT COUNT(*) FROM documents {where}", params[:-2] if conditions else []).fetchone()[0]
-    conn.close()
-
-    docs = [dict(r) for r in rows]
-
-    # Full-text search filter (post-query)
     if search:
+        # With search: fetch all matching rows, filter, then paginate
+        query_str = f"SELECT * FROM documents {where} ORDER BY ingested_at DESC"
+        rows = conn.execute(query_str, params).fetchall()
+        conn.close()
+
         keyword = search.lower()
         filtered = []
-        max_search_results = 50
-        for doc in docs:
-            if len(filtered) >= max_search_results:
-                break
-            # Check title/description first (fast, no I/O)
+        for doc_row in rows:
+            doc = dict(doc_row)
             if keyword in doc.get("title", "").lower() or keyword in doc.get("description", "").lower():
                 filtered.append(doc)
                 continue
-            # Fall back to content search (slower, requires file read)
             try:
                 doc_dir = _safe_doc_path(doc["current_path"])
                 md_path = doc_dir / "document.md"
@@ -208,7 +200,17 @@ async def list_documents(
                     filtered.append(doc)
             except Exception:
                 pass
-        docs = filtered
+
+        total = len(filtered)
+        docs = filtered[offset:offset + limit]
+    else:
+        # Without search: paginate at SQL level
+        query_str = f"SELECT * FROM documents {where} ORDER BY ingested_at DESC LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
+        rows = conn.execute(query_str, params).fetchall()
+        total = conn.execute(f"SELECT COUNT(*) FROM documents {where}", params[:-2] if conditions else []).fetchone()[0]
+        conn.close()
+        docs = [dict(r) for r in rows]
 
     return {"total": total, "documents": docs}
 

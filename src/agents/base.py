@@ -120,18 +120,26 @@ def _collect_all_doc_ids() -> set[str]:
     return ids
 
 
-VALID_ARTICLE_TYPES = {"summary", "concept", "connection", "insight", "qa", "lint"}
+VALID_ARTICLE_TYPES = {"summary", "concept", "connection", "insight", "qa", "lint", "review"}
+
+
+def _yaml_escape(value: str) -> str:
+    """Escape a string for safe YAML double-quoted value."""
+    return value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", " ").strip()
 
 
 def _build_frontmatter(title: str, article_type: str, summary: str, source_titles: list[str], timestamp: str) -> str:
     """Build YAML frontmatter for Obsidian compatibility."""
     date = timestamp[:10] if timestamp else ""
-    sources_yaml = ", ".join(source_titles[:10]) if source_titles else ""
+    safe_title = _yaml_escape(title)
+    safe_summary = _yaml_escape(summary)
+    safe_sources = [_yaml_escape(s) for s in source_titles[:10]]
+    sources_yaml = ", ".join(safe_sources) if safe_sources else ""
     lines = [
         "---",
-        f"title: \"{title}\"",
+        f"title: \"{safe_title}\"",
         f"type: {article_type}",
-        f"summary: \"{summary}\"",
+        f"summary: \"{safe_summary}\"",
     ]
     if sources_yaml:
         lines.append(f"sources: [{sources_yaml}]")

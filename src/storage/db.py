@@ -64,7 +64,8 @@ CREATE TABLE IF NOT EXISTS scheduled_tasks (
 CREATE TABLE IF NOT EXISTS api_tokens (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
-    token TEXT NOT NULL UNIQUE,
+    token_hash TEXT NOT NULL UNIQUE,
+    token_prefix TEXT DEFAULT '',
     created_at TEXT NOT NULL,
     last_used_at TEXT DEFAULT ''
 );
@@ -100,6 +101,28 @@ def init_db() -> None:
     except sqlite3.OperationalError:
         conn.execute("ALTER TABLE wiki_articles ADD COLUMN summary TEXT DEFAULT ''")
         logger.info("Migration: added summary column to wiki_articles")
+    # Migration: api_tokens plaintext → hashed (rename token→token_hash, add token_prefix)
+    try:
+        conn.execute("SELECT token_hash FROM api_tokens LIMIT 1")
+    except sqlite3.OperationalError:
+        try:
+            conn.execute("SELECT token FROM api_tokens LIMIT 1")
+            # Old schema exists — migrate
+            import hashlib
+            rows = conn.execute("SELECT id, token FROM api_tokens").fetchall()
+            conn.execute("ALTER TABLE api_tokens ADD COLUMN token_hash TEXT DEFAULT ''")
+            conn.execute("ALTER TABLE api_tokens ADD COLUMN token_prefix TEXT DEFAULT ''")
+            for row in rows:
+                token_val = row["token"]
+                h = hashlib.sha256(token_val.encode()).hexdigest()
+                prefix = token_val[:8] + "..."
+                conn.execute(
+                    "UPDATE api_tokens SET token_hash = ?, token_prefix = ? WHERE id = ?",
+                    (h, prefix, row["id"]),
+                )
+            logger.info("Migration: hashed %d existing API tokens", len(rows))
+        except sqlite3.OperationalError:
+            pass  # Fresh DB, no migration needed
     conn.commit()
     conn.close()
     logger.info("Database initialized at %s", DB_PATH)
@@ -296,40 +319,41 @@ def delete_custom_prompt(name: str) -> None:
 
 # ── API Tokens ──
 
+def _hash_token(token: str) -> str:
+    """SHA-256 hash a token for secure storage."""
+    import hashlib
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
 def insert_api_token(token_id: str, name: str, token: str) -> None:
-    """Insert a new API token."""
+    """Insert a new API token (stores hash, not plaintext)."""
     conn = get_connection()
     conn.execute(
-        "INSERT INTO api_tokens (id, name, token, created_at) VALUES (?, ?, ?, ?)",
-        (token_id, name, token, now_iso()),
+        "INSERT INTO api_tokens (id, name, token_hash, token_prefix, created_at) VALUES (?, ?, ?, ?, ?)",
+        (token_id, name, _hash_token(token), token[:8] + "...", now_iso()),
     )
     conn.commit()
     conn.close()
 
 
 def validate_api_token(token: str) -> bool:
-    """Check if a token exists. Updates last_used_at."""
+    """Check if a token exists by comparing hashes. Updates last_used_at."""
+    token_hash = _hash_token(token)
     conn = get_connection()
-    row = conn.execute("SELECT id FROM api_tokens WHERE token = ?", (token,)).fetchone()
+    row = conn.execute("SELECT id FROM api_tokens WHERE token_hash = ?", (token_hash,)).fetchone()
     if row:
-        conn.execute("UPDATE api_tokens SET last_used_at = ? WHERE token = ?", (now_iso(), token))
+        conn.execute("UPDATE api_tokens SET last_used_at = ? WHERE token_hash = ?", (now_iso(), token_hash))
         conn.commit()
     conn.close()
     return row is not None
 
 
 def list_api_tokens() -> list[dict]:
-    """List all API tokens (token value masked)."""
+    """List all API tokens (shows prefix only, hash never exposed)."""
     conn = get_connection()
-    rows = conn.execute("SELECT id, name, token, created_at, last_used_at FROM api_tokens").fetchall()
+    rows = conn.execute("SELECT id, name, token_prefix, created_at, last_used_at FROM api_tokens").fetchall()
     conn.close()
-    result = []
-    for r in rows:
-        d = dict(r)
-        # Mask token: show first 8 chars only
-        d["token"] = d["token"][:8] + "..." if len(d["token"]) > 8 else d["token"]
-        result.append(d)
-    return result
+    return [dict(r) for r in rows]
 
 
 def delete_api_token(token_id: str) -> None:
