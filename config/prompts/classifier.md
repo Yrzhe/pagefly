@@ -9,7 +9,11 @@ Your task is to classify the input document, assess its value, determine its tim
 3. subcategory can be an empty string (if the category has no subcategories or none match)
 4. title should be concise and accurate, reflecting the document's core content. Use the same language as the source document
 5. description should summarize the key information in one or two sentences. Use the same language as the source document
-6. tags: extract 3-5 keywords
+6. tags: extract 3-5 keywords following these rules:
+   - Use English for technical terms (e.g., "multi-agent" not "多智能体", "LLM" not "大模型")
+   - Use lowercase with hyphens for multi-word tags (e.g., "multi-agent", "prompt-engineering")
+   - Avoid duplicates or near-synonyms (pick one canonical form)
+   - Keep tags concise (1-3 words each)
 7. confidence reflects your certainty about the classification (0.0-1.0)
 8. reasoning: briefly explain the classification rationale
 

@@ -36,6 +36,11 @@
       "subcategories": []
     },
     {
+      "id": "memo",
+      "name": "备忘",
+      "subcategories": ["voice", "conversation"]
+    },
+    {
       "id": "misc",
       "name": "未分类",
       "subcategories": []

@@ -66,6 +66,12 @@ def _process_entry(doc_dir: Path) -> str | None:
         logger.warning("Folder missing document.md: %s", doc_dir)
         return None
 
+    source_type = metadata.get("source_type", "")
+
+    # Voice memos go directly to memo/voice/ — skip LLM classifier
+    if source_type == "voice":
+        return _process_voice_memo(doc_dir, doc_id, metadata, md_path)
+
     body = read_file(md_path)
     result = classify(body)
 
@@ -144,6 +150,63 @@ def _process_entry(doc_dir: Path) -> str | None:
         "Organized: %s -> %s (confidence=%.2f, status=%s)",
         doc_dir.name, relative_location, result.confidence, new_status,
     )
+    return doc_id
+
+
+def _process_voice_memo(doc_dir: Path, doc_id: str, metadata: dict, md_path: Path) -> str | None:
+    """Route voice transcriptions directly to memo/voice/ without LLM classification."""
+    title = metadata.get("title", doc_dir.name)
+    target_parent = KNOWLEDGE_DIR / "memo" / "voice"
+    target_path = target_parent / doc_dir.name
+
+    try:
+        move_directory(doc_dir, target_path)
+
+        relative_location = str(target_path.relative_to(target_path.parents[3]))
+        update_metadata(target_path, {
+            "title": title,
+            "description": "Voice memo transcription",
+            "tags": ["voice-memo"],
+            "category": "memo",
+            "subcategory": "voice",
+            "status": "classified",
+            "location": relative_location,
+            "classified_at": now_iso(),
+        })
+
+        classified_ts = now_iso()
+        with db.transaction() as conn:
+            fields = {
+                "title": title, "description": "Voice memo transcription",
+                "current_path": str(target_path), "status": "classified",
+                "category": "memo", "subcategory": "voice",
+                "tags": json.dumps(["voice-memo"], ensure_ascii=False),
+                "classified_at": classified_ts,
+            }
+            set_clause = ", ".join(f"{k} = ?" for k in fields)
+            conn.execute(
+                f"UPDATE documents SET {set_clause} WHERE id = ?",
+                [*fields.values(), doc_id],
+            )
+            conn.execute(
+                """INSERT INTO operations_log (document_id, operation, from_path, to_path, details_json, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)""",
+                (doc_id, "classify", str(doc_dir), str(target_path),
+                 json.dumps({"source_type": "voice", "auto_routed": True}, ensure_ascii=False),
+                 classified_ts),
+            )
+    except Exception as e:
+        if target_path.exists() and not doc_dir.exists():
+            try:
+                move_directory(target_path, doc_dir)
+            except Exception:
+                pass
+        logger.error("Voice memo organize failed for %s: %s", doc_id[:8], e)
+        return None
+
+    from src.shared.activity_log import append_log
+    append_log("classify", title, f"→ {relative_location} (voice memo, auto-routed)")
+    logger.info("Voice memo organized: %s -> %s", doc_dir.name, relative_location)
     return doc_id
 
 
