@@ -33,14 +33,15 @@ knowledge/{category}/{subcategory?}/{title}_{id[:8]}/
 ### Categories
 | ID | Name | Subcategories |
 |----|------|---------------|
-| research | 研究 | 半导体, AI, 量化, 宏观经济 |
-| tech | 技术 | 前端, 后端, AI工程, DevOps, 工具 |
-| finance | 财经 | A股, 美股, 加密货币, 投资策略 |
-| people | 人物 | — |
-| projects | 项目 | — |
-| ideas | 想法 | — |
-| notes | 笔记 | — |
-| misc | 未分类 | — |
+| research | Research | semiconductor, ai, quant, macro |
+| tech | Technology | frontend, backend, ai-engineering, devops, tools |
+| finance | Finance | a-shares, us-stocks, crypto, investment-strategy |
+| people | People | — |
+| projects | Projects | — |
+| ideas | Ideas | — |
+| notes | Notes | — |
+| memo | Memo | (dynamic, based on content topic: ai, tech, etc.) |
+| misc | Uncategorized | — |
 
 ### Metadata Fields (Required)
 - `id`: UUID string

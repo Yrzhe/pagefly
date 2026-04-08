@@ -2,47 +2,47 @@
   "categories": [
     {
       "id": "research",
-      "name": "研究",
-      "subcategories": ["半导体", "AI", "量化", "宏观经济"]
+      "name": "Research",
+      "subcategories": ["semiconductor", "ai", "quant", "macro"]
     },
     {
       "id": "tech",
-      "name": "技术",
-      "subcategories": ["前端", "后端", "AI工程", "DevOps", "工具"]
+      "name": "Technology",
+      "subcategories": ["frontend", "backend", "ai-engineering", "devops", "tools"]
     },
     {
       "id": "finance",
-      "name": "财经",
-      "subcategories": ["A股", "美股", "加密货币", "投资策略"]
+      "name": "Finance",
+      "subcategories": ["a-shares", "us-stocks", "crypto", "investment-strategy"]
     },
     {
       "id": "people",
-      "name": "人物",
+      "name": "People",
       "subcategories": []
     },
     {
       "id": "projects",
-      "name": "项目",
+      "name": "Projects",
       "subcategories": []
     },
     {
       "id": "ideas",
-      "name": "想法",
+      "name": "Ideas",
       "subcategories": []
     },
     {
       "id": "notes",
-      "name": "笔记",
+      "name": "Notes",
       "subcategories": []
     },
     {
       "id": "memo",
-      "name": "备忘",
-      "subcategories": ["voice", "conversation"]
+      "name": "Memo",
+      "subcategories": []
     },
     {
       "id": "misc",
-      "name": "未分类",
+      "name": "Uncategorized",
       "subcategories": []
     }
   ]
