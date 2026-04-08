@@ -121,4 +121,7 @@ def classify(content: str, max_chars: int = 2000) -> ClassificationResult:
         tags=last_result.get("tags", []),
         confidence=0.0,
         reasoning="Classification failed after max retries",
+        relevance_score=5,
+        temporal_type="evergreen",
+        key_claims=[],
     )
