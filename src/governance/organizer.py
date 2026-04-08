@@ -96,27 +96,27 @@ def _process_entry(doc_dir: Path) -> str | None:
             "classified_at": now_iso(),
         })
 
-        db.update_document(
-            doc_id,
-            title=result.title,
-            description=result.description,
-            current_path=str(target_path),
-            status=new_status,
-            category=result.category,
-            subcategory=result.subcategory,
-            tags=json.dumps(result.tags, ensure_ascii=False),
-            classified_at=now_iso(),
-        )
-        db.log_operation(
-            doc_id,
-            operation="classify",
-            from_path=str(doc_dir),
-            to_path=str(target_path),
-            details_json=json.dumps({
-                "confidence": result.confidence,
-                "reasoning": result.reasoning,
-            }, ensure_ascii=False),
-        )
+        classified_ts = now_iso()
+        with db.transaction() as conn:
+            fields = {
+                "title": result.title, "description": result.description,
+                "current_path": str(target_path), "status": new_status,
+                "category": result.category, "subcategory": result.subcategory,
+                "tags": json.dumps(result.tags, ensure_ascii=False),
+                "classified_at": classified_ts,
+            }
+            set_clause = ", ".join(f"{k} = ?" for k in fields)
+            conn.execute(
+                f"UPDATE documents SET {set_clause} WHERE id = ?",
+                [*fields.values(), doc_id],
+            )
+            conn.execute(
+                """INSERT INTO operations_log (document_id, operation, from_path, to_path, details_json, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)""",
+                (doc_id, "classify", str(doc_dir), str(target_path),
+                 json.dumps({"confidence": result.confidence, "reasoning": result.reasoning}, ensure_ascii=False),
+                 classified_ts),
+            )
     except Exception as e:
         # Rollback: move back to original location
         if target_path.exists() and not doc_dir.exists():

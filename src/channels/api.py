@@ -130,8 +130,10 @@ async def ingest_file(file: UploadFile = File(...)):
             detail=f"File too large: {len(content) / 1024 / 1024:.1f}MB. Max: {API_MAX_UPLOAD_MB}MB",
         )
 
-    # Write to temp file and ingest
-    tmp_path = Path(tempfile.mkdtemp()) / file.filename
+    # Sanitize filename to prevent path traversal
+    import re
+    safe_name = re.sub(r'[^\w\-.]', '_', Path(file.filename).name) or "upload"
+    tmp_path = Path(tempfile.mkdtemp()) / safe_name
     tmp_path.write_bytes(content)
 
     try:
@@ -287,7 +289,7 @@ async def get_wiki_article(article_id: str):
         raise HTTPException(status_code=404, detail="Wiki article not found")
 
     result = dict(row)
-    article_dir = Path(result["file_path"])
+    article_dir = _safe_doc_path(result["file_path"])
     md_path = article_dir / "document.md"
     meta_path = article_dir / "metadata.json"
 

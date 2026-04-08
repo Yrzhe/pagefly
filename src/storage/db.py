@@ -91,6 +91,25 @@ def get_connection() -> sqlite3.Connection:
     return conn
 
 
+from contextlib import contextmanager
+
+
+@contextmanager
+def transaction():
+    """Context manager for atomic DB transactions.
+    Usage: with db.transaction() as conn: conn.execute(...)
+    Auto-commits on success, auto-rollbacks on exception."""
+    conn = get_connection()
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
 def init_db() -> None:
     """Initialize database tables and run migrations."""
     conn = get_connection()

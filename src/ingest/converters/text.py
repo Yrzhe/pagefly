@@ -10,8 +10,8 @@ def can_handle(input_data: IngestInput) -> bool:
     if input_data.type == "text" and input_data.text:
         return True
     if input_data.type == "file" and input_data.file_path:
-        ext = Path(input_data.file_path).suffix.lower()
-        return ext in {".txt", ".md", ".markdown"}
+        p = Path(input_data.file_path)
+        return p.exists() and p.suffix.lower() in {".txt", ".md", ".markdown"}
     return False
 
 

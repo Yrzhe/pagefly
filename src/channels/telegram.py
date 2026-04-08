@@ -143,7 +143,7 @@ async def _cmd_start(update: Update, context) -> None:
 async def _cmd_reset(update: Update, context) -> None:
     """Handle /reset command."""
     chat_id = update.effective_chat.id
-    _sessions[chat_id] = QuerySession()
+    _sessions[chat_id] = (QuerySession(), datetime.now(timezone.utc).timestamp())
     await update.message.reply_text("Conversation context cleared\\.", parse_mode=ParseMode.MARKDOWN_V2)
 
 

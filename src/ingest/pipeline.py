@@ -52,18 +52,20 @@ def ingest(input_data: IngestInput) -> str | None:
     metadata["title"] = result.title
     doc_dir = RAW_DIR / folder_name
 
-    # Atomic-ish ingest: write files then DB, rollback files on DB failure
+    # Atomic ingest: write files then DB (single transaction), rollback both on failure
     try:
         _write_document(doc_dir, result, metadata)
-        db.insert_document(
-            doc_id=doc_id,
-            title=result.title,
-            source_type=source_type,
-            original_filename=input_data.original_filename,
-            current_path=str(doc_dir),
-            ingested_at=metadata["ingested_at"],
-        )
-        db.log_operation(doc_id, "ingest", to_path=str(doc_dir))
+        with db.transaction() as conn:
+            conn.execute(
+                """INSERT INTO documents (id, title, source_type, original_filename, current_path, ingested_at)
+                VALUES (?, ?, ?, ?, ?, ?)""",
+                (doc_id, result.title, source_type, input_data.original_filename, str(doc_dir), metadata["ingested_at"]),
+            )
+            conn.execute(
+                """INSERT INTO operations_log (document_id, operation, from_path, to_path, details_json, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)""",
+                (doc_id, "ingest", "", str(doc_dir), "{}", db.now_iso()),
+            )
     except Exception as e:
         # Rollback: remove orphan directory if it was created
         import shutil
