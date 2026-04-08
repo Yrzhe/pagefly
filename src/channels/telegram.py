@@ -683,6 +683,8 @@ async def _save_daily_chat(context) -> None:
         session.messages = session.messages[-50:]
         # Refresh timestamp so session doesn't expire before next use
         _sessions[chat_id] = (session, datetime.now(timezone.utc).timestamp())
+        # Persist trimmed session to DB
+        db.save_session(chat_id, session.messages)
 
 
 # ── Approval flow (inline keyboard) ──
