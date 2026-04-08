@@ -20,19 +20,32 @@ async def notify(message: str, file_path: str | None = None) -> None:
 
 
 async def _notify_telegram(message: str, file_path: str | None = None) -> None:
-    """Send notification to Telegram."""
+    """Send notification to Telegram with MarkdownV2 formatting."""
     try:
         from telegram import Bot
+        from telegram.constants import ParseMode
+        from src.channels.telegram import _format_response
 
         bot = Bot(token=TELEGRAM_BOT_TOKEN)
 
-        # Telegram message limit
+        async def _send(text: str):
+            formatted = _format_response(text)
+            try:
+                await bot.send_message(
+                    chat_id=TELEGRAM_CHAT_ID,
+                    text=formatted,
+                    parse_mode=ParseMode.MARKDOWN_V2,
+                )
+            except Exception:
+                # Fallback to plain text if formatting fails
+                await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=text)
+
         if len(message) > 4000:
             chunks = [message[i:i+4000] for i in range(0, len(message), 4000)]
             for chunk in chunks:
-                await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=chunk)
+                await _send(chunk)
         else:
-            await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
+            await _send(message)
 
         if file_path:
             from pathlib import Path
