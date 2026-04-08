@@ -26,6 +26,7 @@ class PendingAction:
 
 # Global pending actions queue: action_id -> PendingAction
 _pending: dict[str, PendingAction] = {}
+_MAX_PENDING = 20  # Hard cap on concurrent pending approvals
 
 # Callback to send approval message via Telegram (set by telegram.py on startup)
 _send_approval_fn = None
@@ -46,6 +47,18 @@ async def request_approval(tool_name: str, doc_id: str, title: str, preview: str
     if _send_approval_fn is None:
         logger.warning("No approval callback registered, auto-approving")
         return True
+
+    # Evict expired pending actions before adding new one
+    now = datetime.now(timezone.utc).timestamp()
+    expired = [aid for aid, a in _pending.items() if now - a.created_at > APPROVAL_TIMEOUT]
+    for aid in expired:
+        action = _pending.pop(aid)
+        if not action.future.done():
+            action.future.set_result(False)
+
+    if len(_pending) >= _MAX_PENDING:
+        logger.warning("Too many pending approvals (%d), rejecting", len(_pending))
+        return False
 
     loop = asyncio.get_running_loop()
     future = loop.create_future()
@@ -71,10 +84,11 @@ async def request_approval(tool_name: str, doc_id: str, title: str, preview: str
     try:
         result = await asyncio.wait_for(future, timeout=APPROVAL_TIMEOUT)
         return result
-    except asyncio.TimeoutError:
-        logger.info("Approval timed out for %s (action=%s)", tool_name, action_id)
-        _pending.pop(action_id, None)
+    except (asyncio.TimeoutError, asyncio.CancelledError):
+        logger.info("Approval timed out / cancelled for %s (action=%s)", tool_name, action_id)
         return False
+    finally:
+        _pending.pop(action_id, None)
 
 
 def resolve_action(action_id: str, approved: bool) -> bool:

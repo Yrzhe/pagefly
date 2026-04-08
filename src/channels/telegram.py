@@ -450,6 +450,8 @@ async def _handle_callback(update: Update, context) -> None:
         return
 
     decision, action_id = data.split(":", 1)
+    if decision not in ("approve", "reject"):
+        return
     approved = decision == "approve"
 
     if resolve_action(action_id, approved):
