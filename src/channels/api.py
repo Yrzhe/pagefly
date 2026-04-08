@@ -56,6 +56,8 @@ async def api_help():
             "GET /api/schedules": "List scheduled tasks",
             "POST /api/schedules": "Create schedule (body: {name, cron_expr, task_type, prompt})",
             "PUT /api/schedules/{id}": "Update schedule",
+            "GET /api/documents/{id}/delete-preview": "Preview deletion impact",
+            "DELETE /api/documents/{id}?confirm=true": "Delete document with reference cleanup",
             "DELETE /api/schedules/{id}": "Delete schedule",
             "GET /api/prompts": "List custom prompts (query: category)",
             "POST /api/prompts": "Save prompt (body: {name, content, category})",
@@ -265,6 +267,44 @@ async def download_document(doc_id: str, format: str = Query(default="zip", patt
         if "weasyprint" in str(e):
             raise HTTPException(status_code=501, detail="PDF generation unavailable (weasyprint not installed)")
         raise
+
+
+# ── Document Deletion ──
+
+@app.get("/api/documents/{doc_id}/delete-preview", dependencies=[Depends(verify_token)])
+async def preview_delete(doc_id: str):
+    """Preview what deleting a document would affect."""
+    from src.storage.deletion import preview_deletion
+    preview = preview_deletion(doc_id)
+    return {
+        "found": preview.found,
+        "doc_id": preview.doc_id,
+        "doc_title": preview.doc_title,
+        "affected_wiki_articles": preview.affected_wiki_articles,
+        "summary": preview.summary(),
+    }
+
+
+@app.delete("/api/documents/{doc_id}", dependencies=[Depends(verify_token)])
+async def delete_doc(doc_id: str, confirm: bool = Query(default=False)):
+    """Delete a document with reference cleanup. Requires confirm=true."""
+    if not confirm:
+        from src.storage.deletion import preview_deletion
+        preview = preview_deletion(doc_id)
+        if not preview.found:
+            raise HTTPException(status_code=404, detail="Document not found")
+        return {
+            "action": "preview",
+            "message": "Add ?confirm=true to actually delete",
+            "summary": preview.summary(),
+            "affected_wiki_articles": len(preview.affected_wiki_articles),
+        }
+
+    from src.storage.deletion import execute_deletion
+    result = execute_deletion(doc_id)
+    if result.startswith("Error"):
+        raise HTTPException(status_code=500, detail=result)
+    return {"action": "deleted", "result": result}
 
 
 # ── Wiki ──

@@ -895,6 +895,43 @@ async def list_prompts(args):
     return {"content": [{"type": "text", "text": json.dumps(result, ensure_ascii=False, indent=2)}]}
 
 
+# ── Deletion tools ──
+
+
+@tool(
+    "preview_delete_document",
+    (
+        "Preview what will happen if a document is deleted. Shows affected wiki articles. "
+        "This is READ-ONLY — nothing is changed. Use this BEFORE delete_document. "
+        "Provide: doc_id (the document's UUID)."
+    ),
+    {"doc_id": str},
+)
+async def preview_delete_document(args):
+    """Preview deletion impact — read only."""
+    from src.storage.deletion import preview_deletion
+
+    preview = preview_deletion(args["doc_id"])
+    return {"content": [{"type": "text", "text": preview.summary()}]}
+
+
+@tool(
+    "delete_document",
+    (
+        "Delete a document and clean all references to it from wiki articles. "
+        "This is DESTRUCTIVE — always call preview_delete_document first and get user confirmation. "
+        "Provide: doc_id (the document's UUID)."
+    ),
+    {"doc_id": str},
+)
+async def delete_document(args):
+    """Delete document with full reference cleanup."""
+    from src.storage.deletion import execute_deletion
+
+    result = execute_deletion(args["doc_id"])
+    return {"content": [{"type": "text", "text": result}]}
+
+
 # ── Workspace tools ──
 
 from src.shared.config import WORKSPACE_DIR
@@ -1023,6 +1060,8 @@ def build_knowledge_tools_server():
             delete_schedule,
             save_prompt,
             list_prompts,
+            preview_delete_document,
+            delete_document,
             write_workspace_file,
             list_workspace_files,
             promote_draft_to_wiki,
@@ -1081,6 +1120,8 @@ def build_agent_options(
             "mcp__pagefly__delete_schedule",
             "mcp__pagefly__save_prompt",
             "mcp__pagefly__list_prompts",
+            "mcp__pagefly__preview_delete_document",
+            "mcp__pagefly__delete_document",
             "mcp__pagefly__write_workspace_file",
             "mcp__pagefly__list_workspace_files",
             "mcp__pagefly__promote_draft_to_wiki",
