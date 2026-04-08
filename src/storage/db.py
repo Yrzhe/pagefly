@@ -120,7 +120,9 @@ def init_db() -> None:
                     "UPDATE api_tokens SET token_hash = ?, token_prefix = ? WHERE id = ?",
                     (h, prefix, row["id"]),
                 )
-            logger.info("Migration: hashed %d existing API tokens", len(rows))
+            # Clear plaintext tokens from old column
+            conn.execute("UPDATE api_tokens SET token = '' WHERE token != ''")
+            logger.info("Migration: hashed %d existing API tokens, cleared plaintext", len(rows))
         except sqlite3.OperationalError:
             pass  # Fresh DB, no migration needed
     conn.commit()

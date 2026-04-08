@@ -134,7 +134,7 @@ def _build_frontmatter(title: str, article_type: str, summary: str, source_title
     safe_title = _yaml_escape(title)
     safe_summary = _yaml_escape(summary)
     safe_sources = [_yaml_escape(s) for s in source_titles[:10]]
-    sources_yaml = ", ".join(safe_sources) if safe_sources else ""
+    sources_yaml = ", ".join(f'"{s}"' for s in safe_sources) if safe_sources else ""
     lines = [
         "---",
         f"title: \"{safe_title}\"",
