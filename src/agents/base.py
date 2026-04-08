@@ -990,11 +990,9 @@ async def write_workspace_file(args):
     rel_path = args["path"]
     content = args["content"]
 
-    # Security: prevent path traversal
-    if ".." in rel_path:
-        return {"content": [{"type": "text", "text": "Error: path must not contain '..'"}]}
-
-    file_path = WORKSPACE_DIR / rel_path
+    file_path = (WORKSPACE_DIR / rel_path).resolve()
+    if not file_path.is_relative_to(WORKSPACE_DIR.resolve()):
+        return {"content": [{"type": "text", "text": "Error: path outside workspace"}]}
     file_path.parent.mkdir(parents=True, exist_ok=True)
     file_path.write_text(content, encoding="utf-8")
 
@@ -1048,10 +1046,9 @@ async def list_workspace_files(args):
 async def read_workspace_file(args):
     """Read a file from workspace."""
     rel_path = args["path"]
-    if ".." in rel_path:
-        return {"content": [{"type": "text", "text": "Error: path must not contain '..'"}]}
-
-    file_path = WORKSPACE_DIR / rel_path
+    file_path = (WORKSPACE_DIR / rel_path).resolve()
+    if not file_path.is_relative_to(WORKSPACE_DIR.resolve()):
+        return {"content": [{"type": "text", "text": "Error: path outside workspace"}]}
     if not file_path.exists():
         return {"content": [{"type": "text", "text": f"Error: file not found: workspace/{rel_path}"}]}
 
@@ -1071,10 +1068,11 @@ async def delete_workspace_file(args):
     """Delete a file or folder from workspace."""
     import shutil
     rel_path = args["path"]
-    if ".." in rel_path:
-        return {"content": [{"type": "text", "text": "Error: path must not contain '..'"}]}
-
-    target = WORKSPACE_DIR / rel_path
+    target = (WORKSPACE_DIR / rel_path).resolve()
+    if not target.is_relative_to(WORKSPACE_DIR.resolve()):
+        return {"content": [{"type": "text", "text": "Error: path outside workspace"}]}
+    if target == WORKSPACE_DIR.resolve():
+        return {"content": [{"type": "text", "text": "Error: cannot delete workspace root"}]}
     if not target.exists():
         return {"content": [{"type": "text", "text": f"Error: not found: workspace/{rel_path}"}]}
 
@@ -1101,10 +1099,9 @@ async def move_workspace_to_raw(args):
     """Move a workspace file to raw/ for ingest."""
     rel_path = args["path"]
     original_filename = args.get("original_filename", "")
-    if ".." in rel_path:
-        return {"content": [{"type": "text", "text": "Error: path must not contain '..'"}]}
-
-    source = WORKSPACE_DIR / rel_path
+    source = (WORKSPACE_DIR / rel_path).resolve()
+    if not source.is_relative_to(WORKSPACE_DIR.resolve()):
+        return {"content": [{"type": "text", "text": "Error: path outside workspace"}]}
     if not source.exists():
         return {"content": [{"type": "text", "text": f"Error: not found: workspace/{rel_path}"}]}
 
