@@ -6,10 +6,11 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 
-from telegram import BotCommand, Update
+from telegram import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ParseMode
 from telegram.ext import (
     Application,
+    CallbackQueryHandler,
     CommandHandler,
     MessageHandler,
     filters,
@@ -17,6 +18,7 @@ from telegram.ext import (
 
 from src.agents.base import file_send_queue
 from src.agents.query import QuerySession, ask
+from src.channels.approval import PendingAction, resolve_action, set_send_approval_callback
 from src.shared.packaging import cleanup_temp_file
 from src.shared.config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, KNOWLEDGE_DIR
 from src.shared.logger import get_logger
@@ -400,13 +402,82 @@ async def _save_daily_chat(context) -> None:
     _sessions.clear()
 
 
+# ── Approval flow (inline keyboard) ──
+
+# Reference to the bot Application, set in run_bot()
+_app: Application | None = None
+
+
+async def _send_approval_to_telegram(action: PendingAction) -> None:
+    """Send an approval request with inline keyboard to the configured chat."""
+    if _app is None or not TELEGRAM_CHAT_ID:
+        logger.error("Cannot send approval: bot not initialized or no chat_id")
+        return
+
+    keyboard = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("Approve", callback_data=f"approve:{action.action_id}"),
+            InlineKeyboardButton("Reject", callback_data=f"reject:{action.action_id}"),
+        ]
+    ])
+
+    text = (
+        f"*Approval Required*\n\n"
+        f"Tool: `{action.tool_name}`\n"
+        f"Document: {_escape_md(action.title)} \\(`{action.doc_id[:8]}`\\)\n\n"
+        f"*Preview:*\n{_escape_md(action.preview)}"
+    )
+
+    # Truncate if too long
+    if len(text) > 4000:
+        text = text[:3950] + "\n\\.\\.\\. \\(truncated\\)"
+
+    await _app.bot.send_message(
+        chat_id=int(TELEGRAM_CHAT_ID),
+        text=text,
+        parse_mode=ParseMode.MARKDOWN_V2,
+        reply_markup=keyboard,
+    )
+
+
+async def _handle_callback(update: Update, context) -> None:
+    """Handle inline keyboard callback for approval/rejection."""
+    query = update.callback_query
+    await query.answer()
+
+    data = query.data or ""
+    if ":" not in data:
+        return
+
+    decision, action_id = data.split(":", 1)
+    approved = decision == "approve"
+
+    if resolve_action(action_id, approved):
+        status_emoji = "Approved" if approved else "Rejected"
+        await query.edit_message_reply_markup(reply_markup=None)
+        await query.edit_message_text(
+            text=query.message.text + f"\n\n— {status_emoji}",
+        )
+    else:
+        await query.edit_message_reply_markup(reply_markup=None)
+        await query.edit_message_text(
+            text=query.message.text + "\n\n— Expired",
+        )
+
+
 def run_bot() -> None:
     """Start the Telegram bot."""
+    global _app
+
     if not TELEGRAM_BOT_TOKEN or TELEGRAM_BOT_TOKEN == "xxx":
         raise ValueError("TELEGRAM_BOT_TOKEN not configured in config.json")
 
     init_db()
     app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+    _app = app
+
+    # Register approval callback so agents can request approval via Telegram
+    set_send_approval_callback(_send_approval_to_telegram)
 
     # Register commands on startup
     app.post_init = _post_init
@@ -416,6 +487,9 @@ def run_bot() -> None:
     app.add_handler(CommandHandler("reset", _cmd_reset))
     app.add_handler(CommandHandler("status", _cmd_status))
     app.add_handler(CommandHandler("search", _cmd_search))
+
+    # Inline keyboard callbacks (approval flow)
+    app.add_handler(CallbackQueryHandler(_handle_callback))
 
     # Document uploads
     app.add_handler(MessageHandler(filters.Document.ALL, _handle_document))

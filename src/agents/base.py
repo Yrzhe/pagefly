@@ -519,6 +519,7 @@ async def search_documents(args):
 )
 async def update_document_content(args):
     """Update a document's content (requires prior approval)."""
+    from src.channels.approval import request_approval
     from src.ingest.metadata import now_iso
     from src.storage import db
 
@@ -532,6 +533,26 @@ async def update_document_content(args):
 
     md_path = doc_dir / "document.md"
     old_content = md_path.read_text(encoding="utf-8")
+
+    # Build change preview for approval
+    meta_path = doc_dir / "metadata.json"
+    title = doc_dir.name
+    if meta_path.exists():
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        title = meta.get("title", title)
+
+    old_snippet = old_content[:150].replace("\n", " ")
+    new_snippet = new_content[:150].replace("\n", " ")
+    preview = (
+        f"{len(old_content)} -> {len(new_content)} chars\n"
+        f"Before: {old_snippet}...\n"
+        f"After: {new_snippet}..."
+    )
+
+    approved = await request_approval("update_document_content", doc_id, title, preview)
+    if not approved:
+        return {"content": [{"type": "text", "text": f"Rejected: user denied update to {doc_id[:8]}"}]}
+
     md_path.write_text(new_content, encoding="utf-8")
 
     # Log operation
