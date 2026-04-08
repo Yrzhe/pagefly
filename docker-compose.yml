@@ -3,6 +3,8 @@ services:
     build: .
     container_name: pagefly
     env_file: .env
+    environment:
+      - TZ=Asia/Shanghai
     volumes:
       - ./data:/app/data
       - ./config:/app/config:ro
