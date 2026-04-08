@@ -97,6 +97,23 @@ async def _run_organize() -> None:
         logger.error("Organize failed: %s", e)
 
 
+async def _run_workspace_organize() -> None:
+    """Scheduled task: LLM-powered workspace triage."""
+    logger.info("Scheduled workspace organize starting...")
+    try:
+        from src.governance.workspace_organizer import organize_workspace
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, organize_workspace)
+        if result["deleted"] + result["ingested"] > 0:
+            summary = f"Workspace organized: {result['deleted']} deleted, {result['ingested']} ingested, {result['kept']} kept"
+            await notify(summary)
+        else:
+            logger.info("Workspace organize: nothing to do")
+    except Exception as e:
+        logger.error("Workspace organize failed: %s", e)
+        await notify(f"Workspace organize failed: {e}")
+
+
 async def _cleanup_workspace() -> None:
     """Remove workspace files older than 7 days."""
     from src.shared.config import WORKSPACE_DIR
@@ -240,13 +257,12 @@ async def start_scheduler() -> None:
         id="wiki_lint", name="Wiki Lint",
     )
 
-    # Workspace cleanup disabled — agent manages own files
-    # To re-enable: uncomment and set desired schedule
-    # scheduler.add_job(
-    #     _cleanup_workspace,
-    #     trigger=CronTrigger(hour=3, minute=30),
-    #     id="workspace_cleanup", name="Workspace Cleanup",
-    # )
+    # Workspace organizer (daily at 3:30am — LLM-powered triage)
+    scheduler.add_job(
+        _run_workspace_organize,
+        trigger=CronTrigger(hour=3, minute=30),
+        id="workspace_organize", name="Workspace Organize",
+    )
 
     # Load user-defined tasks from database
     _load_user_tasks(scheduler)
