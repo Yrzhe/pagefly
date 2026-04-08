@@ -185,38 +185,46 @@ async def _cmd_save(update: Update, context) -> None:
     folder_name = f"memo_{now.strftime('%Y%m%d_%H%M')}_{doc_id[:8]}"
     doc_dir = KNOWLEDGE_DIR / "notes" / folder_name
 
-    create_file(doc_dir / "document.md", content)
-    metadata = {
-        "id": doc_id,
-        "title": title,
-        "description": f"Conversation memo saved at {timestamp_str}",
-        "source_type": "conversation",
-        "original_filename": "",
-        "ingested_at": ts,
-        "status": "classified",
-        "location": f"knowledge/notes/{folder_name}",
-        "tags": ["memo", "conversation"],
-        "category": "notes",
-        "subcategory": "",
-        "references": [],
-    }
-    write_metadata(doc_dir, metadata)
+    try:
+        create_file(doc_dir / "document.md", content)
+        metadata = {
+            "id": doc_id,
+            "title": title,
+            "description": f"Conversation memo saved at {timestamp_str}",
+            "source_type": "conversation",
+            "original_filename": "",
+            "ingested_at": ts,
+            "status": "classified",
+            "location": f"knowledge/notes/{folder_name}",
+            "tags": ["memo", "conversation"],
+            "category": "notes",
+            "subcategory": "",
+            "references": [],
+        }
+        write_metadata(doc_dir, metadata)
 
-    with db.transaction() as conn:
-        conn.execute(
-            """INSERT INTO documents (id, title, source_type, original_filename, current_path, ingested_at)
-            VALUES (?, ?, ?, ?, ?, ?)""",
-            (doc_id, title, "conversation", "", str(doc_dir), ts),
-        )
-        conn.execute(
-            "UPDATE documents SET status=?, category=? WHERE id=?",
-            ("classified", "notes", doc_id),
-        )
-        conn.execute(
-            """INSERT INTO operations_log (document_id, operation, from_path, to_path, details_json, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)""",
-            (doc_id, "ingest", "", str(doc_dir), "{}", ts),
-        )
+        with db.transaction() as conn:
+            conn.execute(
+                """INSERT INTO documents (id, title, source_type, original_filename, current_path, ingested_at)
+                VALUES (?, ?, ?, ?, ?, ?)""",
+                (doc_id, title, "conversation", "", str(doc_dir), ts),
+            )
+            conn.execute(
+                "UPDATE documents SET status=?, category=? WHERE id=?",
+                ("classified", "notes", doc_id),
+            )
+            conn.execute(
+                """INSERT INTO operations_log (document_id, operation, from_path, to_path, details_json, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)""",
+                (doc_id, "ingest", "", str(doc_dir), "{}", ts),
+            )
+    except Exception as e:
+        import shutil
+        if doc_dir.exists():
+            shutil.rmtree(doc_dir, ignore_errors=True)
+        logger.error("Failed to save memo: %s", e)
+        await update.message.reply_text(f"Error saving memo: {e}")
+        return
 
     await update.message.reply_text(
         f"Saved {len(session.messages)} messages as memo\nID: {doc_id[:8]}"
@@ -595,38 +603,45 @@ async def _save_daily_chat(context) -> None:
         folder_name = f"chat_{today}_{doc_id[:8]}"
         doc_dir = KNOWLEDGE_DIR / "conversations" / folder_name
 
-        create_file(doc_dir / "document.md", content)
-        metadata = {
-            "id": doc_id,
-            "title": f"Chat Log {today}",
-            "description": f"Daily conversation log from {today}",
-            "source_type": "conversation",
-            "original_filename": "",
-            "ingested_at": timestamp,
-            "status": "classified",
-            "location": f"knowledge/conversations/{folder_name}",
-            "tags": ["chat", "daily"],
-            "category": "conversations",
-            "subcategory": "",
-            "references": [],
-        }
-        write_metadata(doc_dir, metadata)
+        try:
+            create_file(doc_dir / "document.md", content)
+            metadata = {
+                "id": doc_id,
+                "title": f"Chat Log {today}",
+                "description": f"Daily conversation log from {today}",
+                "source_type": "conversation",
+                "original_filename": "",
+                "ingested_at": timestamp,
+                "status": "classified",
+                "location": f"knowledge/conversations/{folder_name}",
+                "tags": ["chat", "daily"],
+                "category": "conversations",
+                "subcategory": "",
+                "references": [],
+            }
+            write_metadata(doc_dir, metadata)
 
-        with db.transaction() as conn:
-            conn.execute(
-                """INSERT INTO documents (id, title, source_type, original_filename, current_path, ingested_at)
-                VALUES (?, ?, ?, ?, ?, ?)""",
-                (doc_id, f"Chat Log {today}", "conversation", "", str(doc_dir), timestamp),
-            )
-            conn.execute(
-                "UPDATE documents SET status=?, category=? WHERE id=?",
-                ("classified", "conversations", doc_id),
-            )
-            conn.execute(
-                """INSERT INTO operations_log (document_id, operation, from_path, to_path, details_json, created_at)
-                VALUES (?, ?, ?, ?, ?, ?)""",
-                (doc_id, "ingest", "", str(doc_dir), "{}", timestamp),
-            )
+            with db.transaction() as conn:
+                conn.execute(
+                    """INSERT INTO documents (id, title, source_type, original_filename, current_path, ingested_at)
+                    VALUES (?, ?, ?, ?, ?, ?)""",
+                    (doc_id, f"Chat Log {today}", "conversation", "", str(doc_dir), timestamp),
+                )
+                conn.execute(
+                    "UPDATE documents SET status=?, category=? WHERE id=?",
+                    ("classified", "conversations", doc_id),
+                )
+                conn.execute(
+                    """INSERT INTO operations_log (document_id, operation, from_path, to_path, details_json, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?)""",
+                    (doc_id, "ingest", "", str(doc_dir), "{}", timestamp),
+                )
+        except Exception as e:
+            import shutil
+            if doc_dir.exists():
+                shutil.rmtree(doc_dir, ignore_errors=True)
+            logger.error("Failed to save daily chat for %s: %s", chat_id, e)
+            continue
 
         logger.info("Saved daily chat log: %s (%d messages)", today, len(session.messages))
 
