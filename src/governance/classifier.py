@@ -1,6 +1,7 @@
 """Classifier — single Claude API call with structured output."""
 
 import json
+import re
 
 import anthropic
 
@@ -76,10 +77,13 @@ def classify(content: str, max_chars: int = 2000) -> ClassificationResult:
         if result["category"] in valid_ids:
             subcategory = result.get("subcategory", "")
             # Allow classifier to propose new subcategories — don't force empty
-            # Just sanitize: lowercase, hyphens, no special chars
+            # Sanitize: ASCII-only, lowercase, hyphens, no consecutive hyphens
             if subcategory:
                 subcategory = subcategory.strip().lower().replace(" ", "-")
-                subcategory = "".join(c for c in subcategory if c.isalnum() or c == "-")
+                subcategory = "".join(c for c in subcategory if c.isascii() and (c.isalnum() or c == "-"))
+                subcategory = re.sub(r'-{2,}', '-', subcategory).strip("-")
+                if not subcategory:
+                    subcategory = ""
 
             relevance = max(1, min(10, int(result.get("relevance_score", 5))))
             temporal = result.get("temporal_type", "evergreen")

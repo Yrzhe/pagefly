@@ -1,9 +1,12 @@
 """Workspace organizer — daily LLM-powered triage of workspace files."""
 
 import json
+import re
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
+
+MIN_DELETE_AGE_DAYS = 3  # Never delete files younger than this, regardless of LLM decision
 
 import anthropic
 
@@ -82,6 +85,23 @@ def organize_workspace() -> dict:
     return result
 
 
+def _redact_secrets(text: str) -> str:
+    """Redact patterns that look like API keys, tokens, passwords before sending to LLM."""
+    patterns = [
+        (r'(sk-[a-zA-Z0-9_-]{8,})', '[REDACTED_KEY]'),
+        (r'(bu_[a-zA-Z0-9_-]{8,})', '[REDACTED_KEY]'),
+        (r'(vk_[a-zA-Z0-9_-]{8,})', '[REDACTED_KEY]'),
+        (r'(pf_[a-zA-Z0-9_-]{8,})', '[REDACTED_TOKEN]'),
+        (r'(Bearer\s+[a-zA-Z0-9_.-]+)', '[REDACTED_BEARER]'),
+        (r'(api[_-]?key\s*[:=]\s*\S+)', '[REDACTED_APIKEY]'),
+        (r'(password\s*[:=]\s*\S+)', '[REDACTED_PASSWORD]'),
+        (r'(token\s*[:=]\s*\S+)', '[REDACTED_TOKEN]'),
+    ]
+    for pattern, replacement in patterns:
+        text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+    return text
+
+
 def _scan_workspace() -> list[dict]:
     """Collect file info + preview for each workspace file."""
     now = datetime.now(timezone.utc)
@@ -95,11 +115,16 @@ def _scan_workspace() -> list[dict]:
         stat = file_path.stat()
         age_days = (now - datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)).days
 
-        # Read preview (first 500 chars for text files)
+        # Skip sensitive file types
+        SKIP_EXTENSIONS = {".env", ".key", ".pem", ".json", ".sqlite", ".db"}
+        if file_path.suffix.lower() in SKIP_EXTENSIONS:
+            continue
+
+        # Read preview — redact anything that looks like a secret
         preview = ""
         try:
             content = file_path.read_text(encoding="utf-8", errors="replace")
-            preview = content[:500]
+            preview = _redact_secrets(content[:300])
         except Exception:
             preview = f"(binary file, {stat.st_size} bytes)"
 
@@ -180,9 +205,16 @@ def _execute_decisions(decisions: list[dict]) -> dict:
                 summary["kept"] += 1
 
             elif action == "delete":
+                # Safety: never delete files younger than MIN_DELETE_AGE_DAYS
+                stat = file_path.stat()
+                age_days = (datetime.now(timezone.utc) - datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)).days
+                if age_days < MIN_DELETE_AGE_DAYS:
+                    logger.warning("Skipping delete (too young: %dd < %dd): %s", age_days, MIN_DELETE_AGE_DAYS, rel_path)
+                    summary["kept"] += 1
+                    continue
                 file_path.unlink()
                 summary["deleted"] += 1
-                logger.info("Workspace delete: %s (%s)", rel_path, reason)
+                logger.info("Workspace delete: %s (age=%dd, %s)", rel_path, age_days, reason)
 
             elif action == "ingest":
                 _move_to_raw(file_path, rel_path)
