@@ -11,6 +11,9 @@
     "mistral": {
       "api_key": "xxx",
       "base_url": "https://api.mistral.ai"
+    },
+    "browser_use_cloud": {
+      "api_key": "bu_xxx"
     }
   },
   "telegram": {
