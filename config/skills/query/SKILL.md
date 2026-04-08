@@ -57,6 +57,20 @@ If all criteria are met:
 
 **Be conservative**: when in doubt, do NOT save. It's better to miss a good insight than to pollute the wiki with noise.
 
+## URL Ingestion
+
+When the user shares a URL and asks you to save/read/ingest it:
+
+1. **Fetch** the URL content using the fetch_url tool
+2. **Evaluate** whether the content is worth saving:
+   - Is it substantive (not a login page, error page, or mostly ads)?
+   - Does it contain useful knowledge (articles, papers, tutorials, analysis)?
+   - Is it relevant to the user's interests?
+3. **If worth saving**: call `create_knowledge_doc` with a clean title, the extracted content, and relevant tags. It will go through the full pipeline (classify → knowledge → wiki).
+4. **If not worth saving**: summarize the content for the user but do NOT save it. Tell the user why you didn't save it.
+
+**Be selective** — not every URL deserves a spot in the knowledge base.
+
 ## Constraints
 
 - **NEVER delete** any files
