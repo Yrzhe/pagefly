@@ -805,6 +805,10 @@ async def start_bot() -> Application:
 
     await app.initialize()
     await app.start()
+
+    # Register bot commands (post_init doesn't fire in manual start mode)
+    await _post_init(app)
+
     await app.updater.start_polling(drop_pending_updates=True)
     logger.info("Telegram bot started (async)")
     return app
