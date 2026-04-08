@@ -29,9 +29,13 @@ COPY src/ ./src/
 COPY config/ ./config/
 COPY pyproject.toml ./
 
-# Create data directories
-RUN mkdir -p /app/data/raw /app/data/knowledge /app/data/wiki \
-    /app/data/inbox /app/data/workspace
+# Create non-root user and data directories
+RUN groupadd -r pagefly && useradd -r -g pagefly -d /app pagefly \
+    && mkdir -p /app/data/raw /app/data/knowledge /app/data/wiki \
+       /app/data/inbox /app/data/workspace \
+    && chown -R pagefly:pagefly /app
+
+USER pagefly
 
 # Health check — hits the FastAPI /health endpoint
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \

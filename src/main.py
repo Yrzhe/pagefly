@@ -13,7 +13,10 @@ logger = get_logger("main")
 def _run_api_server() -> None:
     """Run FastAPI server in a separate thread."""
     import uvicorn
-    uvicorn.run("src.channels.api:app", host="0.0.0.0", port=API_PORT, log_level="info")
+    try:
+        uvicorn.run("src.channels.api:app", host="0.0.0.0", port=API_PORT, log_level="info")
+    except Exception as e:
+        logger.error("API server crashed: %s", e)
 
 
 async def _main() -> None:

@@ -5,10 +5,10 @@ services:
     env_file: .env
     volumes:
       - ./data:/app/data
-      - ./config:/app/config
+      - ./config:/app/config:ro
       - ./config.json:/app/config.json:ro
     ports:
-      - "${API_PORT:-8000}:8000"
+      - "127.0.0.1:${API_PORT:-8000}:8000"
     restart: unless-stopped
     logging:
       driver: json-file
