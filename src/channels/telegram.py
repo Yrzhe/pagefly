@@ -211,6 +211,7 @@ async def _cmd_save(update: Update, context) -> None:
         ingested_at=ts,
     )
     db.update_document(doc_id, status="classified", category="notes")
+    db.log_operation(doc_id, "ingest", to_path=str(doc_dir))
 
     await update.message.reply_text(
         f"Saved {len(session.messages)} messages as memo\nID: {doc_id[:8]}"
@@ -621,6 +622,8 @@ async def _save_daily_chat(context) -> None:
 
         # Trim to last 50 messages (keep context for tomorrow) instead of clearing
         session.messages = session.messages[-50:]
+        # Refresh timestamp so session doesn't expire before next use
+        _sessions[chat_id] = (session, datetime.now(timezone.utc).timestamp())
 
 
 # ── Approval flow (inline keyboard) ──
