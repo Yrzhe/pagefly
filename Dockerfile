@@ -11,7 +11,7 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# System dependencies for weasyprint (PDF rendering)
+# System dependencies for weasyprint (PDF rendering) + Chinese fonts
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpango-1.0-0 \
     libpangocairo-1.0-0 \
@@ -19,6 +19,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libffi-dev \
     libcairo2 \
     curl \
+    fonts-noto-cjk \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy installed packages from builder
