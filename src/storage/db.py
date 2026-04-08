@@ -77,6 +77,12 @@ CREATE TABLE IF NOT EXISTS custom_prompts (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS chat_sessions (
+    chat_id INTEGER PRIMARY KEY,
+    messages_json TEXT NOT NULL DEFAULT '[]',
+    updated_at TEXT NOT NULL
+);
 """
 
 
@@ -403,5 +409,49 @@ def delete_api_token(token_id: str) -> None:
     """Delete an API token by ID."""
     conn = get_connection()
     conn.execute("DELETE FROM api_tokens WHERE id = ?", (token_id,))
+    conn.commit()
+    conn.close()
+
+
+# ── Chat Sessions ──
+
+def save_session(chat_id: int, messages: list[dict]) -> None:
+    """Persist a chat session to database."""
+    import json
+    conn = get_connection()
+    conn.execute(
+        """INSERT INTO chat_sessions (chat_id, messages_json, updated_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(chat_id) DO UPDATE SET messages_json=excluded.messages_json, updated_at=excluded.updated_at""",
+        (chat_id, json.dumps(messages, ensure_ascii=False), now_iso()),
+    )
+    conn.commit()
+    conn.close()
+
+
+def load_session(chat_id: int) -> list[dict] | None:
+    """Load a chat session from database. Returns None if not found."""
+    import json
+    conn = get_connection()
+    row = conn.execute("SELECT messages_json FROM chat_sessions WHERE chat_id = ?", (chat_id,)).fetchone()
+    conn.close()
+    if row:
+        return json.loads(row["messages_json"])
+    return None
+
+
+def load_all_sessions() -> dict[int, list[dict]]:
+    """Load all chat sessions from database."""
+    import json
+    conn = get_connection()
+    rows = conn.execute("SELECT chat_id, messages_json FROM chat_sessions").fetchall()
+    conn.close()
+    return {row["chat_id"]: json.loads(row["messages_json"]) for row in rows}
+
+
+def delete_session(chat_id: int) -> None:
+    """Delete a chat session from database."""
+    conn = get_connection()
+    conn.execute("DELETE FROM chat_sessions WHERE chat_id = ?", (chat_id,))
     conn.commit()
     conn.close()

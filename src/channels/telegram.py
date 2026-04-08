@@ -34,10 +34,10 @@ _SESSION_MSG_CAP = 100  # Max messages per session (oldest trimmed)
 
 
 def _get_session(chat_id: int) -> QuerySession:
-    """Get or create a session for a chat. Evicts expired/excess sessions."""
+    """Get or create a session for a chat. Loads from DB if not in memory."""
     now = datetime.now(timezone.utc).timestamp()
 
-    # Evict expired sessions
+    # Evict expired sessions from memory
     expired = [cid for cid, (_, ts) in _sessions.items() if now - ts > _SESSION_TTL]
     for cid in expired:
         del _sessions[cid]
@@ -48,7 +48,11 @@ def _get_session(chat_id: int) -> QuerySession:
         del _sessions[oldest]
 
     if chat_id not in _sessions:
-        _sessions[chat_id] = (QuerySession(), now)
+        # Try to restore from database
+        from src.storage.db import load_session
+        saved = load_session(chat_id)
+        session = QuerySession(messages=saved) if saved else QuerySession()
+        _sessions[chat_id] = (session, now)
     else:
         # Update last access time
         session, _ = _sessions[chat_id]
@@ -61,6 +65,20 @@ def _get_session(chat_id: int) -> QuerySession:
         session.messages = session.messages[-_SESSION_MSG_CAP:]
 
     return session
+
+
+def _persist_session(chat_id: int) -> None:
+    """Save current session to database (call after each message exchange)."""
+    if chat_id not in _sessions:
+        return
+    session, _ = _sessions[chat_id]
+    if not session.messages:
+        return
+    from src.storage.db import save_session
+    try:
+        save_session(chat_id, session.messages)
+    except Exception as e:
+        logger.debug("Session persist failed: %s", e)
 
 
 def _escape_md(text: str) -> str:
@@ -236,6 +254,8 @@ async def _cmd_reset(update: Update, context) -> None:
     """Handle /reset command."""
     chat_id = update.effective_chat.id
     _sessions[chat_id] = (QuerySession(), datetime.now(timezone.utc).timestamp())
+    from src.storage.db import delete_session
+    delete_session(chat_id)
     await update.message.reply_text("Conversation context cleared\\.", parse_mode=ParseMode.MARKDOWN_V2)
 
 
@@ -384,6 +404,9 @@ async def _handle_message(update: Update, context) -> None:
                 logger.error("Failed to send file %s: %s", file_path, e)
             finally:
                 cleanup_temp_file(file_path)
+
+        # Persist session to DB after successful exchange
+        _persist_session(chat_id)
 
     except Exception as e:
         stop_typing.set()
