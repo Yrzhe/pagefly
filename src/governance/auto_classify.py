@@ -22,8 +22,13 @@ def schedule_classify(doc_dir: Path, doc_id: str) -> None:
             return
         _pending.add(doc_id)
 
-    _executor.submit(_classify_worker, doc_dir, doc_id)
-    logger.info("Queued for classification: %s", doc_id[:8])
+    try:
+        _executor.submit(_classify_worker, doc_dir, doc_id)
+        logger.info("Queued for classification: %s", doc_id[:8])
+    except Exception as e:
+        with _lock:
+            _pending.discard(doc_id)
+        logger.error("Failed to queue classification for %s: %s", doc_id[:8], e)
 
 
 def _classify_worker(doc_dir: Path, doc_id: str) -> None:
@@ -41,16 +46,21 @@ def _classify_worker(doc_dir: Path, doc_id: str) -> None:
 
             # Notify via Telegram if configured
             try:
-                from src.scheduler.notifier import dispatch
-                from src.ingest.metadata import read_metadata
-                new_dir = _find_classified_dir(doc_id)
-                if new_dir:
-                    meta = read_metadata(new_dir)
-                    title = meta.get("title", doc_id[:8])
-                    category = meta.get("category", "?")
-                    dispatch(f"Classified: {title} → {category}")
-            except Exception:
-                pass
+                from src.storage.db import get_document
+                doc = get_document(doc_id)
+                if doc:
+                    title = doc.get("title", doc_id[:8])
+                    category = doc.get("category", "?")
+
+                    import asyncio
+                    from src.scheduler.notifier import notify
+                    try:
+                        loop = asyncio.get_running_loop()
+                        loop.create_task(notify(f"Classified: {title} → {category}"))
+                    except RuntimeError:
+                        asyncio.run(notify(f"Classified: {title} → {category}"))
+            except Exception as e:
+                logger.debug("Notification skipped: %s", e)
         else:
             logger.warning("Classification failed for: %s", doc_id[:8])
     except Exception as e:
@@ -58,17 +68,3 @@ def _classify_worker(doc_dir: Path, doc_id: str) -> None:
     finally:
         with _lock:
             _pending.discard(doc_id)
-
-
-def _find_classified_dir(doc_id: str) -> Path | None:
-    """Find a classified document's directory by searching knowledge/."""
-    from src.shared.config import KNOWLEDGE_DIR
-    for meta_path in KNOWLEDGE_DIR.rglob("metadata.json"):
-        try:
-            import json
-            meta = json.loads(meta_path.read_text(encoding="utf-8"))
-            if meta.get("id") == doc_id:
-                return meta_path.parent
-        except Exception:
-            continue
-    return None
