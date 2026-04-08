@@ -78,7 +78,7 @@ def _persist_session(chat_id: int) -> None:
     try:
         save_session(chat_id, session.messages)
     except Exception as e:
-        logger.debug("Session persist failed: %s", e)
+        logger.warning("Session persist failed for chat %d: %s", chat_id, e)
 
 
 def _escape_md(text: str) -> str:
@@ -610,17 +610,24 @@ async def _save_daily_chat(context) -> None:
 
     now = datetime.now(timezone.utc).astimezone()
     today = now.strftime("%Y-%m-%d")
-    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
 
     for chat_id, (session, _ts) in list(_sessions.items()):
         if not session.messages:
             continue
 
         # Only archive today's messages (avoid re-archiving old ones)
-        today_msgs = [
-            m for m in session.messages
-            if m.get("ts", "") >= today_start
-        ]
+        today_msgs = []
+        for m in session.messages:
+            ts_str = m.get("ts", "")
+            if not ts_str:
+                continue
+            try:
+                msg_time = datetime.fromisoformat(ts_str)
+                if msg_time >= today_start:
+                    today_msgs.append(m)
+            except (ValueError, TypeError):
+                continue
 
         if not today_msgs:
             continue
