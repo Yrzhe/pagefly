@@ -302,6 +302,8 @@ async def delete_doc(doc_id: str, confirm: bool = Query(default=False)):
 
     from src.storage.deletion import execute_deletion
     result = execute_deletion(doc_id)
+    if "not found" in result:
+        raise HTTPException(status_code=404, detail=result)
     if result.startswith("Error"):
         raise HTTPException(status_code=500, detail=result)
     return {"action": "deleted", "result": result}

@@ -35,8 +35,7 @@ CREATE TABLE IF NOT EXISTS operations_log (
     from_path TEXT DEFAULT '',
     to_path TEXT DEFAULT '',
     details_json TEXT DEFAULT '{}',
-    created_at TEXT NOT NULL,
-    FOREIGN KEY (document_id) REFERENCES documents(id)
+    created_at TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS wiki_articles (
@@ -144,6 +143,29 @@ def init_db() -> None:
             logger.info("Migration: hashed %d existing API tokens, cleared plaintext", len(rows))
         except sqlite3.OperationalError:
             pass  # Fresh DB, no migration needed
+    # Migration: remove FK constraint from operations_log (allows document deletion)
+    try:
+        fk_info = conn.execute("PRAGMA foreign_key_list(operations_log)").fetchall()
+        if fk_info:
+            conn.execute("PRAGMA foreign_keys=OFF")
+            conn.executescript("""
+                CREATE TABLE IF NOT EXISTS operations_log_new (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    document_id TEXT NOT NULL,
+                    operation TEXT NOT NULL,
+                    from_path TEXT DEFAULT '',
+                    to_path TEXT DEFAULT '',
+                    details_json TEXT DEFAULT '{}',
+                    created_at TEXT NOT NULL
+                );
+                INSERT INTO operations_log_new SELECT * FROM operations_log;
+                DROP TABLE operations_log;
+                ALTER TABLE operations_log_new RENAME TO operations_log;
+            """)
+            conn.execute("PRAGMA foreign_keys=ON")
+            logger.info("Migration: removed FK constraint from operations_log")
+    except Exception as e:
+        logger.warning("operations_log FK migration skipped: %s", e)
     conn.commit()
     conn.close()
     logger.info("Database initialized at %s", DB_PATH)

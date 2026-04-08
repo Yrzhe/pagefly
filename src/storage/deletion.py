@@ -101,13 +101,11 @@ def execute_deletion(doc_id: str) -> str:
                 f"Deletion aborted to prevent inconsistency. Error: {e}"
             )
 
-    # Step 2: Delete document (filesystem + DB in transaction)
+    # Step 2: Delete document (DB then filesystem)
     try:
+        timestamp = db.now_iso()
         with db.transaction() as conn:
-            # Delete from documents table
-            conn.execute("DELETE FROM documents WHERE id = ?", (doc_id,))
-
-            # Log the deletion
+            # Log deletion BEFORE removing the document (foreign key requires doc exists)
             conn.execute(
                 """INSERT INTO operations_log (document_id, operation, from_path, to_path, details_json, created_at)
                 VALUES (?, ?, ?, ?, ?, ?)""",
@@ -117,9 +115,12 @@ def execute_deletion(doc_id: str) -> str:
                         "title": title,
                         "affected_wiki_articles": len(affected),
                     }, ensure_ascii=False),
-                    db.now_iso(),
+                    timestamp,
                 ),
             )
+
+            # Now delete from documents table
+            conn.execute("DELETE FROM documents WHERE id = ?", (doc_id,))
 
         # Only delete filesystem AFTER DB transaction succeeds
         if doc_dir.exists():
@@ -189,7 +190,8 @@ def _find_affected_wiki_articles(doc_id: str) -> list[dict]:
     for meta_path in WIKI_DIR.rglob("metadata.json"):
         try:
             meta = json.loads(meta_path.read_text(encoding="utf-8"))
-        except Exception:
+        except Exception as e:
+            logger.warning("Corrupted wiki metadata (skipped): %s (%s)", meta_path, e)
             continue
 
         # Check source_document_ids
