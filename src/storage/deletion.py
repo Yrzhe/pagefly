@@ -245,14 +245,14 @@ def _clean_wiki_references(wiki_article_id: str, doc_id_to_remove: str) -> None:
     meta["references"] = new_refs
     meta["updated_at"] = db.now_iso()
 
-    # Write updated metadata to disk
-    meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
-
-    # Update DB
+    # Update DB first, then filesystem (DB is authoritative)
     db.update_wiki_article(
         wiki_article_id,
         source_document_ids=json.dumps(new_sources),
     )
+
+    # Write updated metadata to disk
+    meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
 
     logger.info(
         "Cleaned references in wiki article %s: removed %d source(s), %d ref(s)",

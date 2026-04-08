@@ -362,15 +362,20 @@ async def write_wiki_article(args):
         meta_path = article_dir / "metadata.json"
         meta_path.write_text(meta_json, encoding="utf-8")
 
-        # Record in database
-        conn = db.get_connection()
-        conn.execute(
-            """INSERT INTO wiki_articles (id, title, article_type, file_path, summary, source_document_ids, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (article_id, title, article_type, str(article_dir), summary, json.dumps(valid_source_ids), timestamp, timestamp),
-        )
-        conn.commit()
-        conn.close()
+        # Record in database (rollback files on failure)
+        try:
+            with db.transaction() as conn:
+                conn.execute(
+                    """INSERT INTO wiki_articles (id, title, article_type, file_path, summary, source_document_ids, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (article_id, title, article_type, str(article_dir), summary, json.dumps(valid_source_ids), timestamp, timestamp),
+                )
+        except Exception as e:
+            import shutil
+            if article_dir.exists():
+                shutil.rmtree(article_dir, ignore_errors=True)
+            logger.error("DB insert failed, rolled back wiki article: %s", e)
+            return {"content": [{"type": "text", "text": f"Error: DB write failed: {e}"}]}
 
         mode = "created"
 
@@ -602,16 +607,28 @@ async def create_knowledge_doc(args):
     }
     write_metadata(doc_dir, metadata)
 
-    db.insert_document(
-        doc_id=doc_id,
-        title=title,
-        source_type="agent",
-        original_filename="",
-        current_path=str(doc_dir),
-        ingested_at=timestamp,
-    )
-    db.update_document(doc_id, status="classified", category=category, tags=json.dumps(tags, ensure_ascii=False))
-    db.log_operation(doc_id, "ingest", to_path=str(doc_dir))
+    try:
+        with db.transaction() as conn:
+            conn.execute(
+                """INSERT INTO documents (id, title, source_type, original_filename, current_path, ingested_at)
+                VALUES (?, ?, ?, ?, ?, ?)""",
+                (doc_id, title, "agent", "", str(doc_dir), timestamp),
+            )
+            conn.execute(
+                "UPDATE documents SET status=?, category=?, tags=? WHERE id=?",
+                ("classified", category, json.dumps(tags, ensure_ascii=False), doc_id),
+            )
+            conn.execute(
+                """INSERT INTO operations_log (document_id, operation, from_path, to_path, details_json, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)""",
+                (doc_id, "ingest", "", str(doc_dir), "{}", db.now_iso()),
+            )
+    except Exception as e:
+        import shutil
+        if doc_dir.exists():
+            shutil.rmtree(doc_dir, ignore_errors=True)
+        logger.error("DB insert failed, rolled back knowledge doc: %s", e)
+        return {"content": [{"type": "text", "text": f"Error: DB write failed: {e}"}]}
 
     # Light integrity check
     from src.shared.integrity import check_document

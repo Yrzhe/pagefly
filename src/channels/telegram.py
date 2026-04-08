@@ -202,16 +202,21 @@ async def _cmd_save(update: Update, context) -> None:
     }
     write_metadata(doc_dir, metadata)
 
-    db.insert_document(
-        doc_id=doc_id,
-        title=title,
-        source_type="conversation",
-        original_filename="",
-        current_path=str(doc_dir),
-        ingested_at=ts,
-    )
-    db.update_document(doc_id, status="classified", category="notes")
-    db.log_operation(doc_id, "ingest", to_path=str(doc_dir))
+    with db.transaction() as conn:
+        conn.execute(
+            """INSERT INTO documents (id, title, source_type, original_filename, current_path, ingested_at)
+            VALUES (?, ?, ?, ?, ?, ?)""",
+            (doc_id, title, "conversation", "", str(doc_dir), ts),
+        )
+        conn.execute(
+            "UPDATE documents SET status=?, category=? WHERE id=?",
+            ("classified", "notes", doc_id),
+        )
+        conn.execute(
+            """INSERT INTO operations_log (document_id, operation, from_path, to_path, details_json, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)""",
+            (doc_id, "ingest", "", str(doc_dir), "{}", ts),
+        )
 
     await update.message.reply_text(
         f"Saved {len(session.messages)} messages as memo\nID: {doc_id[:8]}"
@@ -607,16 +612,21 @@ async def _save_daily_chat(context) -> None:
         }
         write_metadata(doc_dir, metadata)
 
-        db.insert_document(
-            doc_id=doc_id,
-            title=f"Chat Log {today}",
-            source_type="conversation",
-            original_filename="",
-            current_path=str(doc_dir),
-            ingested_at=timestamp,
-        )
-        db.update_document(doc_id, status="classified", category="conversations")
-        db.log_operation(doc_id, "ingest", to_path=str(doc_dir))
+        with db.transaction() as conn:
+            conn.execute(
+                """INSERT INTO documents (id, title, source_type, original_filename, current_path, ingested_at)
+                VALUES (?, ?, ?, ?, ?, ?)""",
+                (doc_id, f"Chat Log {today}", "conversation", "", str(doc_dir), timestamp),
+            )
+            conn.execute(
+                "UPDATE documents SET status=?, category=? WHERE id=?",
+                ("classified", "conversations", doc_id),
+            )
+            conn.execute(
+                """INSERT INTO operations_log (document_id, operation, from_path, to_path, details_json, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)""",
+                (doc_id, "ingest", "", str(doc_dir), "{}", timestamp),
+            )
 
         logger.info("Saved daily chat log: %s (%d messages)", today, len(session.messages))
 
