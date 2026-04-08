@@ -1,0 +1,74 @@
+"""Post-ingest classification worker — runs in background with concurrency control."""
+
+import threading
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+
+from src.shared.config import WATCHER_PARALLEL_LIMIT
+from src.shared.logger import get_logger
+
+logger = get_logger("governance.auto_classify")
+
+_executor = ThreadPoolExecutor(max_workers=WATCHER_PARALLEL_LIMIT, thread_name_prefix="classify")
+_lock = threading.Lock()
+_pending: set[str] = set()  # doc_ids currently being classified
+
+
+def schedule_classify(doc_dir: Path, doc_id: str) -> None:
+    """Submit a document for background classification. Non-blocking."""
+    with _lock:
+        if doc_id in _pending:
+            logger.debug("Already queued: %s", doc_id[:8])
+            return
+        _pending.add(doc_id)
+
+    _executor.submit(_classify_worker, doc_dir, doc_id)
+    logger.info("Queued for classification: %s", doc_id[:8])
+
+
+def _classify_worker(doc_dir: Path, doc_id: str) -> None:
+    """Worker that classifies a single document."""
+    try:
+        if not doc_dir.exists():
+            logger.warning("Document dir gone before classification: %s", doc_dir)
+            return
+
+        from src.governance.organizer import _process_entry
+        result = _process_entry(doc_dir)
+
+        if result:
+            logger.info("Auto-classified: %s", doc_id[:8])
+
+            # Notify via Telegram if configured
+            try:
+                from src.scheduler.notifier import dispatch
+                from src.ingest.metadata import read_metadata
+                new_dir = _find_classified_dir(doc_id)
+                if new_dir:
+                    meta = read_metadata(new_dir)
+                    title = meta.get("title", doc_id[:8])
+                    category = meta.get("category", "?")
+                    dispatch(f"Classified: {title} → {category}")
+            except Exception:
+                pass
+        else:
+            logger.warning("Classification failed for: %s", doc_id[:8])
+    except Exception as e:
+        logger.error("Auto-classify error for %s: %s", doc_id[:8], e)
+    finally:
+        with _lock:
+            _pending.discard(doc_id)
+
+
+def _find_classified_dir(doc_id: str) -> Path | None:
+    """Find a classified document's directory by searching knowledge/."""
+    from src.shared.config import KNOWLEDGE_DIR
+    for meta_path in KNOWLEDGE_DIR.rglob("metadata.json"):
+        try:
+            import json
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            if meta.get("id") == doc_id:
+                return meta_path.parent
+        except Exception:
+            continue
+    return None

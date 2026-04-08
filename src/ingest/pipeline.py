@@ -85,6 +85,11 @@ def ingest(input_data: IngestInput) -> str | None:
     )
 
     logger.info("Ingested document: %s (id=%s)", doc_dir.name, doc_id[:8])
+
+    # Trigger background classification immediately
+    from src.governance.auto_classify import schedule_classify
+    schedule_classify(doc_dir, doc_id)
+
     return doc_id
 
 
