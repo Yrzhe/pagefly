@@ -1,0 +1,66 @@
+@import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300..700&family=IBM+Plex+Mono:wght@400;500&family=Fraunces:opsz,wght@9..144,400..700&display=swap');
+
+@theme {
+  /* Core Palette */
+  --color-bg-primary: #FFFEF5;
+  --color-bg-secondary: #FFF8E7;
+  --color-bg-tertiary: #FFF3D0;
+  --color-accent-primary: #F59E0B;
+  --color-accent-secondary: #D97706;
+  --color-accent-warm: #FBBF24;
+  --color-text-primary: #1C1917;
+  --color-text-secondary: #78716C;
+  --color-text-tertiary: #A8A29E;
+  --color-border: #E7E5E4;
+  --color-sidebar-bg: #FEF9EF;
+  --color-code-bg: #FDF6E3;
+
+  /* Semantic Colors */
+  --color-success: #16A34A;
+  --color-warning: #EA580C;
+  --color-error: #DC2626;
+  --color-info: #2563EB;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.08);
+
+  /* Border Radius */
+  --radius-sm: 6px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  --radius-full: 9999px;
+
+  /* Typography */
+  --font-heading: 'Space Grotesk', system-ui, sans-serif;
+  --font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, Consolas, monospace;
+  --font-serif: 'Fraunces', Georgia, serif;
+}
+
+@layer base {
+  html {
+    font-size: 15px;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    color: var(--color-text-primary);
+    background-color: var(--color-bg-primary);
+    line-height: 1.6;
+  }
+
+  h1, h2, h3 {
+    font-family: var(--font-heading);
+    line-height: 1.2;
+  }
+
+  code, pre {
+    font-family: var(--font-mono);
+  }
+}

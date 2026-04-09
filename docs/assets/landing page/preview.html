@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PageFly — Personal Knowledge OS</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Space Grotesk', system-ui, sans-serif;
+    background: #FFFEF5;
+    color: #1C1917;
+  }
+
+  /* ── Nav ── */
+  nav {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 20px 48px;
+    background: rgba(255, 254, 245, 0.85);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid rgba(231, 229, 228, 0.5);
+  }
+  .nav-logo {
+    display: flex; align-items: center; gap: 10px;
+    font-weight: 700; font-size: 18px;
+  }
+  .nav-logo img { width: 32px; height: 32px; border-radius: 8px; }
+  .nav-badge {
+    font-size: 12px; color: #78716C;
+    background: #FFF8E7; padding: 4px 10px; border-radius: 12px;
+  }
+
+  /* ── Hero ── */
+  .hero {
+    position: relative; width: 100%;
+  }
+  .hero video {
+    width: 100%; height: auto; display: block;
+  }
+  .hero-overlay {
+    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+    background: linear-gradient(
+      to bottom,
+      rgba(255, 254, 245, 0.3) 0%,
+      rgba(255, 254, 245, 0.15) 50%,
+      rgba(255, 254, 245, 0.95) 90%,
+      #FFFEF5 100%
+    );
+    z-index: 1;
+  }
+  .hero-content {
+    position: absolute; top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 2;
+    max-width: 800px; padding: 0 24px;
+    text-align: center;
+  }
+  .hero-tag {
+    display: inline-block;
+    background: rgba(245, 158, 11, 0.15); color: #D97706;
+    padding: 6px 16px; border-radius: 20px;
+    font-size: 13px; font-weight: 500; letter-spacing: 0.5px;
+    margin-bottom: 24px;
+  }
+  .hero h1 {
+    font-size: 56px; font-weight: 700; line-height: 1.15;
+    margin-bottom: 20px; letter-spacing: -1px;
+  }
+  .hero p {
+    font-size: 18px; color: #78716C; line-height: 1.6;
+    max-width: 560px; margin: 0 auto 32px;
+  }
+  .btn-github {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: #1C1917; color: #FFFEF5;
+    padding: 14px 28px; border-radius: 12px;
+    font-size: 15px; font-weight: 600;
+    text-decoration: none; transition: transform 0.2s, box-shadow 0.2s;
+  }
+  .btn-github:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,0.15); }
+
+  /* ── Features ── */
+  .section { padding: 100px 48px; max-width: 1200px; margin: 0 auto; }
+  .section-label {
+    font-size: 12px; font-weight: 600; letter-spacing: 2px;
+    color: #D97706; text-transform: uppercase; margin-bottom: 12px; text-align: center;
+  }
+  .section-title {
+    font-size: 36px; font-weight: 700; text-align: center;
+    margin-bottom: 16px; letter-spacing: -0.5px;
+  }
+  .section-desc {
+    font-size: 16px; color: #78716C; text-align: center;
+    max-width: 520px; margin: 0 auto 56px;
+  }
+  .features-grid {
+    display: grid; grid-template-columns: repeat(3, 1fr);
+    gap: 24px;
+  }
+  .feature-card {
+    background: #FFF8E7; border: 1px solid #E7E5E4;
+    border-radius: 16px; padding: 32px;
+    transition: transform 0.2s, box-shadow 0.2s;
+  }
+  .feature-card:hover { transform: translateY(-4px); box-shadow: 0 12px 32px rgba(0,0,0,0.06); }
+  .feature-card img {
+    width: 100%; height: 160px; object-fit: cover;
+    border-radius: 12px; margin-bottom: 20px;
+  }
+  .feature-card h3 { font-size: 18px; font-weight: 600; margin-bottom: 8px; }
+  .feature-card p { font-size: 14px; color: #78716C; line-height: 1.5; }
+
+  /* ── Architecture ── */
+  .architecture { background: #FFF8E7; border-radius: 20px; padding: 60px; text-align: center; }
+  .architecture img { max-width: 100%; border-radius: 12px; margin-top: 32px; }
+
+  /* ── Inspired ── */
+  .inspired {
+    display: flex; gap: 48px; align-items: center;
+    background: #FFF8E7; border-radius: 20px; padding: 48px;
+  }
+  .inspired-text { flex: 1; }
+  .inspired-text blockquote {
+    font-size: 28px; font-weight: 600; line-height: 1.4;
+    margin-bottom: 16px;
+  }
+  .inspired-text p { color: #78716C; line-height: 1.6; }
+  .inspired-text a { color: #D97706; }
+  .inspired-img { flex: 1; text-align: center; }
+  .inspired-img img { max-width: 100%; border-radius: 12px; }
+
+  /* ── CTA ── */
+  .cta {
+    text-align: center; padding: 80px 48px;
+    background: linear-gradient(to bottom, #FFFEF5, #FFF3D0);
+    border-radius: 20px; margin: 0 48px;
+  }
+  .cta h2 { font-size: 36px; font-weight: 700; margin-bottom: 24px; }
+
+  /* ── Footer ── */
+  footer {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 32px 48px; color: #A8A29E; font-size: 13px;
+  }
+  footer a { color: #78716C; text-decoration: none; }
+  footer a:hover { color: #D97706; }
+</style>
+</head>
+<body>
+
+<!-- Nav -->
+<nav>
+  <div class="nav-logo">
+    <img src="PageFly Logo.png" alt="PageFly">
+    <span>PageFly</span>
+  </div>
+  <span class="nav-badge">Open Source · MIT</span>
+</nav>
+
+<!-- Hero -->
+<section class="hero">
+  <video autoplay muted loop playsinline>
+    <source src="Landing Page Hero.mp4" type="video/mp4">
+  </video>
+  <div class="hero-overlay"></div>
+  <div class="hero-content">
+    <span class="hero-tag">Capture &rarr; Distill &rarr; Compile &rarr; Serve</span>
+    <h1>Build your personal knowledge OS.</h1>
+    <p>Turn raw documents into a structured, searchable, AI-ready knowledge system with wiki views, graph exploration, and automation workflows.</p>
+    <a href="https://github.com/Yrzhe/pagefly" class="btn-github">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+      View on GitHub
+    </a>
+  </div>
+</section>
+
+<!-- Features -->
+<section class="section">
+  <div class="section-label">Why PageFly</div>
+  <div class="section-title">Six capabilities, one knowledge surface.</div>
+  <div class="section-desc">Every format in, structured knowledge out.</div>
+  <div class="features-grid">
+    <div class="feature-card">
+      <img src="Feature Icon 1 - 多格式导入.png" alt="Capture">
+      <h3>Capture</h3>
+      <p>Ingest PDF, images, Word, voice memos, and plain text. Every format converted to searchable markdown.</p>
+    </div>
+    <div class="feature-card">
+      <img src="Feature Icon 2 - AI 自动分类.png" alt="Distill">
+      <h3>Distill</h3>
+      <p>AI classifies documents, scores relevance, tags temporal value, and extracts key claims automatically.</p>
+    </div>
+    <div class="feature-card">
+      <img src="Feature Icon 3 - Wiki 编译.png" alt="Compile">
+      <h3>Compile</h3>
+      <p>Generate summaries, concepts, and connections. One canonical page per idea, continuously updated.</p>
+    </div>
+    <div class="feature-card">
+      <img src="Feature Icon 4 - Telegram Bot.png" alt="Telegram">
+      <h3>Telegram Bot</h3>
+      <p>Chat with your knowledge base. Upload files, ask questions, get AI-synthesized answers on mobile.</p>
+    </div>
+    <div class="feature-card">
+      <img src="Feature Icon 5 - REST API.png" alt="API">
+      <h3>REST API</h3>
+      <p>17+ endpoints with multi-token auth. Ingest, query, search, and manage your knowledge programmatically.</p>
+    </div>
+    <div class="feature-card">
+      <img src="Feature Icon 6 - Obsidian 兼容.png" alt="Obsidian">
+      <h3>Obsidian Compatible</h3>
+      <p>YAML frontmatter, wikilinks, and bidirectional references. Open your wiki directly in Obsidian.</p>
+    </div>
+  </div>
+</section>
+
+<!-- Architecture -->
+<section class="section">
+  <div class="architecture">
+    <div class="section-label">Architecture</div>
+    <div class="section-title">A visual pipeline from raw notes to usable knowledge.</div>
+    <img src="Architecture Diagram.png" alt="Capture → Distill → Compile → Serve">
+  </div>
+</section>
+
+<!-- Inspired By -->
+<section class="section">
+  <div class="inspired">
+    <div class="inspired-text">
+      <div class="section-label">Inspired By</div>
+      <blockquote>"LMWiki showed what happens when knowledge becomes navigable."</blockquote>
+      <p>PageFly extends that idea with a capture and distillation layer, making the messy front-half of knowledge work first-class instead of hidden.</p>
+      <p style="margin-top: 12px;"><a href="https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f">Inspired by Karpathy's LMWiki</a></p>
+    </div>
+    <div class="inspired-img">
+      <img src="OG Image.png" alt="PageFly concept">
+    </div>
+  </div>
+</section>
+
+<!-- CTA -->
+<section class="section">
+  <div class="cta">
+    <div class="section-label">Open Source Project</div>
+    <h2>Start building your knowledge OS.</h2>
+    <a href="https://github.com/Yrzhe/pagefly" class="btn-github">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+      View on GitHub
+    </a>
+  </div>
+</section>
+
+<!-- Footer -->
+<footer>
+  <div>PageFly &middot; MIT License &middot; &copy; 2026</div>
+  <div>
+    <a href="https://github.com/Yrzhe/pagefly">GitHub</a> &nbsp;&middot;&nbsp;
+    <a href="https://x.com/yrzhe_top">@yrzhe_top</a>
+  </div>
+</footer>
+
+</body>
+</html>

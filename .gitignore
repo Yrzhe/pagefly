@@ -23,11 +23,21 @@ data/inbox/*
 !data/wiki/.gitkeep
 !data/inbox/.gitkeep
 
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
 # IDE
 .vscode/
 .idea/
 *.swp
 *.swo
+
+# Design files
+docs/design/
+
+# Playwright
+.playwright-mcp/
 
 # OS
 .DS_Store
