@@ -885,6 +885,35 @@ async def get_stats():
     }
 
 
+# ── Trends ──
+
+@app.get("/api/trends", dependencies=[Depends(verify_token)])
+async def get_trends(days: int = Query(default=14)):
+    """Get daily operation counts for trend charts."""
+    conn = db.get_connection()
+    rows = conn.execute(
+        """SELECT DATE(created_at) as day, operation, COUNT(*) as count
+           FROM operations_log
+           WHERE created_at >= DATE('now', ?)
+           GROUP BY day, operation
+           ORDER BY day""",
+        (f"-{min(days, 90)} days",),
+    ).fetchall()
+    conn.close()
+
+    daily: dict[str, dict[str, int]] = {}
+    for r in rows:
+        day = r["day"]
+        if day not in daily:
+            daily[day] = {"ingest": 0, "classify": 0, "wiki_compile": 0, "total": 0}
+        op = r["operation"]
+        if op in daily[day]:
+            daily[day][op] = r["count"]
+        daily[day]["total"] += r["count"]
+
+    return {"trends": [{"date": d, **v} for d, v in sorted(daily.items())]}
+
+
 # ── Activity ──
 
 @app.get("/api/activity", dependencies=[Depends(verify_token)])
