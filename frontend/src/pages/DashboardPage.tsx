@@ -64,7 +64,7 @@ export function DashboardPage() {
       setStats(s.data)
       setActivity(a.data.activity || [])
       setTrends(t.data.trends || [])
-    } catch { /* silent */ }
+    } catch (err) { console.error('Dashboard fetch error:', err) }
     finally { setLoading(false) }
   }, [])
 
@@ -88,7 +88,7 @@ export function DashboardPage() {
         <h1 className="font-heading text-[15px] font-bold text-text-primary">Dashboard</h1>
       </header>
 
-      <div className="p-6 flex flex-col gap-6 max-w-[1100px]">
+      <div className="p-6 flex flex-col gap-6 max-w-[1100px] mx-auto w-full">
         {/* Top cards */}
         <div className="grid grid-cols-4 gap-4">
           <StatCard icon={<FileText size={16} />} label="Documents" value={stats?.documents || 0} sub={`+${todayIngest} today`} onClick={() => navigate('/knowledge')} />
