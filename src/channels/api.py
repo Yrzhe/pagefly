@@ -637,6 +637,61 @@ async def move_workspace_to_raw(file_path: str):
     return {"status": "ok", "doc_id": doc_id, "message": f"Moved {file_path} to ingest pipeline"}
 
 
+@app.post("/api/workspace", dependencies=[Depends(verify_token)])
+async def create_workspace_file(body: dict):
+    """Create a new file in workspace."""
+    name = body.get("name", "").strip()
+    content = body.get("content", "")
+    if not name:
+        raise HTTPException(status_code=400, detail="Name required")
+    # Sanitize name
+    safe_name = Path(name).name
+    target = (WORKSPACE_DIR / safe_name).resolve()
+    if not target.is_relative_to(WORKSPACE_DIR.resolve()):
+        raise HTTPException(status_code=403, detail="Invalid path")
+    WORKSPACE_DIR.mkdir(parents=True, exist_ok=True)
+    target.write_text(content, encoding="utf-8")
+    return {"status": "ok", "path": safe_name}
+
+
+@app.put("/api/workspace/{file_path:path}", dependencies=[Depends(verify_token)])
+async def update_workspace_file(file_path: str, body: dict):
+    """Update workspace file content or rename."""
+    target = (WORKSPACE_DIR / file_path).resolve()
+    if not target.is_relative_to(WORKSPACE_DIR.resolve()):
+        raise HTTPException(status_code=403, detail="Invalid path")
+    if not target.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+
+    # Rename
+    new_name = body.get("name")
+    if new_name and new_name != target.name:
+        safe_name = Path(new_name).name
+        new_target = (WORKSPACE_DIR / safe_name).resolve()
+        if not new_target.is_relative_to(WORKSPACE_DIR.resolve()):
+            raise HTTPException(status_code=403, detail="Invalid name")
+        target.rename(new_target)
+        target = new_target
+
+    # Update content
+    content = body.get("content")
+    if content is not None:
+        target.write_text(content, encoding="utf-8")
+
+    return {"status": "ok", "path": str(target.relative_to(WORKSPACE_DIR))}
+
+
+@app.post("/api/workspace/upload", dependencies=[Depends(verify_token)])
+async def upload_to_workspace(file: UploadFile = File(...)):
+    """Upload a file to workspace (not ingest)."""
+    WORKSPACE_DIR.mkdir(parents=True, exist_ok=True)
+    safe_name = Path(file.filename or "upload").name
+    target = WORKSPACE_DIR / safe_name
+    content = await file.read()
+    target.write_bytes(content)
+    return {"status": "ok", "path": safe_name, "size": len(content)}
+
+
 @app.delete("/api/workspace/{file_path:path}", dependencies=[Depends(verify_token)])
 async def delete_workspace_file(file_path: str):
     """Delete a workspace file."""
