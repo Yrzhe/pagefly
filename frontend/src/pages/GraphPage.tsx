@@ -191,15 +191,15 @@ export function GraphPage() {
         randomize: false,
       } as cytoscape.LayoutOptions
 
-      cy.on('grab', 'node', () => {
-        // Start live physics on drag
+      cy.on('grab', 'node', (e) => {
+        e.target.lock()
         liveLayout?.stop()
         liveLayout = cy.layout(colaOpts)
         liveLayout.run()
       })
 
-      cy.on('free', 'node', () => {
-        // Stop physics 500ms after release (let it settle briefly)
+      cy.on('free', 'node', (e) => {
+        e.target.unlock()
         setTimeout(() => { liveLayout?.stop() }, 500)
       })
 
