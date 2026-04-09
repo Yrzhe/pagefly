@@ -97,6 +97,34 @@ async def _run_organize() -> None:
         logger.error("Organize failed: %s", e)
 
 
+async def _catchup_chat_archive() -> None:
+    """On startup, check if yesterday's chat archive was missed and run it if so."""
+    from datetime import datetime, timezone, timedelta
+    from src.storage import db as database
+
+    await asyncio.sleep(10)  # Wait for bot to initialize
+
+    yesterday = (datetime.now(timezone.utc).astimezone() - timedelta(days=1)).strftime("%Y-%m-%d")
+
+    conn = database.get_connection()
+    row = conn.execute(
+        "SELECT COUNT(*) FROM documents WHERE title LIKE ? AND source_type = 'text'",
+        (f"%{yesterday}%",),
+    ).fetchone()
+    conn.close()
+
+    if row[0] == 0:
+        logger.info("Missed archive for %s detected, running catch-up...", yesterday)
+        try:
+            from src.channels.telegram import _save_daily_chat
+            await _save_daily_chat(None)
+            logger.info("Catch-up archive for %s completed", yesterday)
+        except Exception as e:
+            logger.error("Catch-up archive failed: %s", e)
+    else:
+        logger.info("Archive for %s already exists, no catch-up needed", yesterday)
+
+
 async def _run_workspace_organize() -> None:
     """Scheduled task: LLM-powered workspace triage."""
     logger.info("Scheduled workspace organize starting...")
@@ -280,6 +308,9 @@ async def start_scheduler() -> None:
             _reload_user_tasks(scheduler)
 
     reload_task = asyncio.create_task(_reload_loop())
+
+    # Catch-up: check if yesterday's chat archive was missed (e.g., due to restart)
+    asyncio.create_task(_catchup_chat_archive())
 
     logger.info("Scheduler started with %d jobs + inbox watcher + live reload", len(jobs))
     await watch_inbox()
