@@ -19,9 +19,8 @@ docker compose rm -f
 echo "==> Rebuilding image..."
 docker compose build
 
-echo "==> Cleaning old images and build cache..."
+echo "==> Cleaning dangling images..."
 docker image prune -f
-docker builder prune -f
 
 echo "==> Starting container..."
 docker compose up -d

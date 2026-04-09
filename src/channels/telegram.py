@@ -205,14 +205,15 @@ async def _cmd_save(update: Update, context) -> None:
             file_path=str(tmp_path),
             original_filename=tmp_path.name,
         )
-        doc_id = ingest(input_data)
+        loop = asyncio.get_event_loop()
+        doc_id = await loop.run_in_executor(None, ingest, input_data)
     except Exception as e:
         logger.error("Failed to save memo: %s", e)
         await update.message.reply_text(f"Error saving memo: {e}")
         return
     finally:
-        tmp_path.unlink(missing_ok=True)
-        Path(tmp_dir).rmdir()
+        import shutil
+        shutil.rmtree(tmp_dir, ignore_errors=True)
 
     if doc_id:
         await update.message.reply_text(
@@ -221,7 +222,6 @@ async def _cmd_save(update: Update, context) -> None:
         logger.info("Conversation saved via pipeline: %s (%d messages)", title[:40], len(session.messages))
     else:
         await update.message.reply_text("Failed to save memo")
-    logger.info("Conversation saved as memo: %s (%d messages)", title[:40], len(session.messages))
 
 
 async def _cmd_reset(update: Update, context) -> None:
@@ -626,7 +626,8 @@ async def _save_daily_chat(context) -> None:
                 file_path=str(tmp_path),
                 original_filename=f"chat_{today}.md",
             )
-            doc_id = ingest(input_data)
+            loop = asyncio.get_event_loop()
+            doc_id = await loop.run_in_executor(None, ingest, input_data)
             if doc_id:
                 logger.info("Daily chat archived via pipeline: %s (%d messages)", today, len(today_msgs))
             else:
@@ -634,13 +635,14 @@ async def _save_daily_chat(context) -> None:
         except Exception as e:
             logger.error("Failed to save daily chat for %s: %s", chat_id, e)
         finally:
-            tmp_path.unlink(missing_ok=True)
-            Path(tmp_dir).rmdir()
+            import shutil
+            shutil.rmtree(tmp_dir, ignore_errors=True)
 
         # Trim to last 50 messages (keep context for tomorrow)
-        session.messages = session.messages[-50:]
+        trimmed = list(session.messages[-50:])
+        session.messages = trimmed
         _sessions[chat_id] = (session, datetime.now(timezone.utc).timestamp())
-        db.save_session(chat_id, session.messages)
+        db.save_session(chat_id, trimmed)
 
 
 # ── Approval flow (inline keyboard) ──

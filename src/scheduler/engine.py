@@ -99,7 +99,7 @@ async def _run_organize() -> None:
 
 async def _catchup_chat_archive() -> None:
     """On startup, check if yesterday's chat archive was missed and run it if so."""
-    from datetime import datetime, timezone, timedelta
+    from datetime import timedelta
     from src.storage import db as database
 
     await asyncio.sleep(10)  # Wait for bot to initialize
@@ -108,15 +108,23 @@ async def _catchup_chat_archive() -> None:
 
     conn = database.get_connection()
     row = conn.execute(
-        "SELECT COUNT(*) FROM documents WHERE title LIKE ? AND source_type = 'text'",
-        (f"%{yesterday}%",),
+        "SELECT COUNT(*) FROM documents WHERE original_filename = ?",
+        (f"chat_{yesterday}.md",),
     ).fetchone()
     conn.close()
 
     if row[0] == 0:
         logger.info("Missed archive for %s detected, running catch-up...", yesterday)
         try:
-            from src.channels.telegram import _save_daily_chat
+            from src.channels.telegram import _save_daily_chat, _sessions
+            from src.agents.query import QuerySession
+
+            # Hydrate in-memory sessions from DB so _save_daily_chat has data
+            all_sessions = database.load_all_sessions()
+            for cid, msgs in all_sessions.items():
+                if cid not in _sessions and msgs:
+                    _sessions[cid] = (QuerySession(messages=msgs), datetime.now(timezone.utc).timestamp())
+
             await _save_daily_chat(None)
             logger.info("Catch-up archive for %s completed", yesterday)
         except Exception as e:
