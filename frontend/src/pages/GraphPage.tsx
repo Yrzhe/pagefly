@@ -175,6 +175,27 @@ export function GraphPage() {
         }
       })
 
+      // Dynamic drag: brief physics sim when node is released
+      let dragLayout: cytoscape.Layouts | undefined
+      cy.on('free', 'node', () => {
+        dragLayout?.stop()
+        dragLayout = cy.layout({
+          name: 'cola',
+          animate: true,
+          infinite: false,
+          maxSimulationTime: 800,
+          fit: false,
+          nodeDimensionsIncludeLabels: true,
+          edgeLength: 100,
+          nodeSpacing: 25,
+          handleDisconnected: true,
+          avoidOverlap: true,
+          ungrabifyWhileSimulating: false,
+          randomize: false,
+        } as cytoscape.LayoutOptions)
+        dragLayout.run()
+      })
+
       cyRef.current = cy
     } catch { /* silent */ }
   }, [])
