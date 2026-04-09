@@ -5,6 +5,7 @@ import { LandingPage } from '@/pages/LandingPage'
 import { LoginPage } from '@/pages/LoginPage'
 import { DashboardPage } from '@/pages/DashboardPage'
 import { KnowledgePage } from '@/pages/KnowledgePage'
+import { WikiPage } from '@/pages/WikiPage'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuth()
@@ -35,6 +36,16 @@ export default function App() {
               <ProtectedRoute>
                 <AppLayout>
                   <KnowledgePage />
+                </AppLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/wiki"
+            element={
+              <ProtectedRoute>
+                <AppLayout>
+                  <WikiPage />
                 </AppLayout>
               </ProtectedRoute>
             }
