@@ -1,0 +1,302 @@
+import { useState, useEffect, useRef, useCallback } from 'react'
+import { GitFork, Search, ZoomIn, ZoomOut, Maximize2, X } from 'lucide-react'
+import cytoscape from 'cytoscape'
+import api from '@/api/client'
+
+interface GraphNode {
+  id: string
+  label: string
+  type: 'document' | 'wiki'
+  category?: string
+  subcategory?: string
+  article_type?: string
+}
+
+interface GraphEdge {
+  source: string
+  target: string
+  relation: string
+}
+
+const NODE_COLORS: Record<string, string> = {
+  document: '#F59E0B',
+  concept: '#2563EB',
+  summary: '#D97706',
+  connection: '#7C3AED',
+  insight: '#16A34A',
+  qa: '#EA580C',
+  lint: '#DC2626',
+  review: '#78716C',
+}
+
+function getNodeColor(node: GraphNode): string {
+  if (node.type === 'wiki') return NODE_COLORS[node.article_type || ''] || '#2563EB'
+  return NODE_COLORS.document
+}
+
+export function GraphPage() {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const cyRef = useRef<cytoscape.Core | null>(null)
+  const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null)
+  const [search, setSearch] = useState('')
+  const [stats, setStats] = useState({ nodes: 0, edges: 0 })
+
+  const initGraph = useCallback(async () => {
+    if (!containerRef.current) return
+
+    try {
+      const { data } = await api.get('/api/graph')
+      const nodes: GraphNode[] = data.nodes || []
+      const edges: GraphEdge[] = data.edges || []
+
+      setStats({ nodes: nodes.length, edges: edges.length })
+
+      // Build cytoscape elements
+      const nodeSet = new Set(nodes.map((n) => n.id))
+      const cyNodes = nodes.map((n) => ({
+        data: {
+          id: n.id,
+          label: n.label.length > 20 ? n.label.slice(0, 20) + '...' : n.label,
+          fullLabel: n.label,
+          type: n.type,
+          category: n.category || '',
+          subcategory: n.subcategory || '',
+          article_type: n.article_type || '',
+          color: getNodeColor(n),
+          size: n.type === 'wiki' ? 40 : 30,
+        },
+      }))
+
+      const cyEdges = edges
+        .filter((e) => nodeSet.has(e.source) && nodeSet.has(e.target))
+        .map((e, i) => ({
+          data: {
+            id: `e${i}`,
+            source: e.source,
+            target: e.target,
+            relation: e.relation,
+          },
+        }))
+
+      const cy = cytoscape({
+        container: containerRef.current,
+        elements: [...cyNodes, ...cyEdges],
+        style: [
+          {
+            selector: 'node',
+            style: {
+              'background-color': 'data(color)',
+              label: 'data(label)',
+              'font-size': '10px',
+              'font-family': 'system-ui, sans-serif',
+              color: '#1C1917',
+              'text-valign': 'bottom',
+              'text-margin-y': 6,
+              width: 'data(size)',
+              height: 'data(size)',
+              'border-width': 2,
+              'border-color': '#E7E5E4',
+            },
+          },
+          {
+            selector: 'node[type="wiki"]',
+            style: {
+              shape: 'diamond',
+            },
+          },
+          {
+            selector: 'node:selected',
+            style: {
+              'border-width': 3,
+              'border-color': '#1C1917',
+              'background-opacity': 1,
+            },
+          },
+          {
+            selector: 'node.highlighted',
+            style: {
+              'border-width': 3,
+              'border-color': '#F59E0B',
+              'background-opacity': 1,
+            },
+          },
+          {
+            selector: 'node.dimmed',
+            style: {
+              opacity: 0.2,
+            },
+          },
+          {
+            selector: 'edge',
+            style: {
+              width: 1.5,
+              'line-color': '#E7E5E4',
+              'target-arrow-color': '#A8A29E',
+              'target-arrow-shape': 'triangle',
+              'curve-style': 'bezier',
+              'arrow-scale': 0.8,
+            },
+          },
+          {
+            selector: 'edge.highlighted',
+            style: {
+              'line-color': '#F59E0B',
+              'target-arrow-color': '#F59E0B',
+              width: 2.5,
+            },
+          },
+          {
+            selector: 'edge.dimmed',
+            style: {
+              opacity: 0.1,
+            },
+          },
+        ],
+        layout: {
+          name: 'cose',
+          animate: false,
+          nodeDimensionsIncludeLabels: true,
+          idealEdgeLength: () => 120,
+          nodeRepulsion: () => 8000,
+          padding: 40,
+        } as cytoscape.LayoutOptions,
+      })
+
+      cy.on('tap', 'node', (e) => {
+        const node = e.target
+        const nodeData: GraphNode = {
+          id: node.data('id'),
+          label: node.data('fullLabel'),
+          type: node.data('type'),
+          category: node.data('category'),
+          subcategory: node.data('subcategory'),
+          article_type: node.data('article_type'),
+        }
+        setSelectedNode(nodeData)
+
+        // Highlight connected nodes
+        cy.elements().removeClass('highlighted dimmed')
+        const connected = node.neighborhood()
+        cy.elements().addClass('dimmed')
+        node.removeClass('dimmed').addClass('highlighted')
+        connected.removeClass('dimmed').addClass('highlighted')
+      })
+
+      cy.on('tap', (e) => {
+        if (e.target === cy) {
+          setSelectedNode(null)
+          cy.elements().removeClass('highlighted dimmed')
+        }
+      })
+
+      cyRef.current = cy
+    } catch {
+      // silent
+    }
+  }, [])
+
+  useEffect(() => {
+    initGraph()
+    return () => { cyRef.current?.destroy() }
+  }, [initGraph])
+
+  // Search highlight
+  useEffect(() => {
+    const cy = cyRef.current
+    if (!cy) return
+    cy.elements().removeClass('highlighted dimmed')
+    if (!search) return
+    const lower = search.toLowerCase()
+    const matches = cy.nodes().filter((n) =>
+      n.data('fullLabel').toLowerCase().includes(lower) ||
+      n.data('category').toLowerCase().includes(lower) ||
+      n.data('article_type').toLowerCase().includes(lower)
+    )
+    if (matches.length > 0) {
+      cy.elements().addClass('dimmed')
+      matches.forEach((n) => {
+        n.removeClass('dimmed').addClass('highlighted')
+        n.neighborhood().removeClass('dimmed').addClass('highlighted')
+      })
+    }
+  }, [search])
+
+  const handleZoomIn = () => { cyRef.current?.zoom(cyRef.current.zoom() * 1.3) }
+  const handleZoomOut = () => { cyRef.current?.zoom(cyRef.current.zoom() / 1.3) }
+  const handleFit = () => { cyRef.current?.fit(undefined, 40) }
+
+  return (
+    <div className="flex flex-col h-screen">
+      <header className="flex items-center justify-between px-6 h-14 border-b border-border flex-shrink-0">
+        <div className="flex items-center gap-3">
+          <GitFork size={16} className="text-accent-primary" />
+          <h1 className="font-heading text-[15px] font-bold text-text-primary">Knowledge Graph</h1>
+          <span className="text-xs text-text-tertiary">{stats.nodes} nodes · {stats.edges} edges</span>
+        </div>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 px-3 py-2 border border-border rounded-[6px] w-56">
+            <Search size={14} className="text-text-tertiary" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search nodes..."
+              className="flex-1 bg-transparent text-sm text-text-primary placeholder:text-text-tertiary outline-none"
+            />
+          </div>
+          <div className="flex gap-1">
+            <button onClick={handleZoomIn} className="p-2 border border-border rounded-[6px] hover:bg-bg-secondary transition-colors"><ZoomIn size={14} className="text-text-secondary" /></button>
+            <button onClick={handleZoomOut} className="p-2 border border-border rounded-[6px] hover:bg-bg-secondary transition-colors"><ZoomOut size={14} className="text-text-secondary" /></button>
+            <button onClick={handleFit} className="p-2 border border-border rounded-[6px] hover:bg-bg-secondary transition-colors"><Maximize2 size={14} className="text-text-secondary" /></button>
+          </div>
+        </div>
+      </header>
+
+      <div className="flex flex-1 overflow-hidden relative">
+        {/* Graph canvas */}
+        <div ref={containerRef} className="flex-1 bg-bg-primary" />
+
+        {/* Legend */}
+        <div className="absolute bottom-4 left-4 bg-bg-secondary/90 backdrop-blur-sm border border-border rounded-[8px] px-3 py-2 flex gap-4 text-[10px]">
+          <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-[#F59E0B]" /> Document</span>
+          <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-[#2563EB] rotate-45" /> Concept</span>
+          <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-[#D97706] rotate-45" /> Summary</span>
+          <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-[#7C3AED] rotate-45" /> Connection</span>
+        </div>
+
+        {/* Selected node panel */}
+        {selectedNode && (
+          <aside className="absolute top-4 right-4 w-[260px] bg-bg-secondary/95 backdrop-blur-sm border border-border rounded-[12px] p-4 shadow-lg">
+            <div className="flex items-start justify-between mb-3">
+              <div className="flex-1 min-w-0">
+                <span className="text-[10px] font-bold uppercase tracking-[1px] text-accent-primary">
+                  {selectedNode.type === 'wiki' ? selectedNode.article_type : 'Document'}
+                </span>
+                <h3 className="text-sm font-semibold text-text-primary mt-0.5 leading-snug">{selectedNode.label}</h3>
+              </div>
+              <button onClick={() => { setSelectedNode(null); cyRef.current?.elements().removeClass('highlighted dimmed') }} className="p-1 hover:bg-bg-tertiary rounded">
+                <X size={12} className="text-text-tertiary" />
+              </button>
+            </div>
+            <div className="flex flex-col gap-1.5 text-[11px]">
+              <div className="flex justify-between">
+                <span className="text-text-tertiary">ID</span>
+                <span className="font-mono text-text-secondary">{selectedNode.id.slice(0, 12)}</span>
+              </div>
+              {selectedNode.category && (
+                <div className="flex justify-between">
+                  <span className="text-text-tertiary">Category</span>
+                  <span className="text-text-secondary">{selectedNode.category}{selectedNode.subcategory ? ` / ${selectedNode.subcategory}` : ''}</span>
+                </div>
+              )}
+              <div className="flex justify-between">
+                <span className="text-text-tertiary">Type</span>
+                <span className="text-text-secondary">{selectedNode.type}{selectedNode.article_type ? ` (${selectedNode.article_type})` : ''}</span>
+              </div>
+            </div>
+          </aside>
+        )}
+      </div>
+    </div>
+  )
+}

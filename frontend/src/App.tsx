@@ -7,6 +7,7 @@ import { DashboardPage } from '@/pages/DashboardPage'
 import { KnowledgePage } from '@/pages/KnowledgePage'
 import { WikiPage } from '@/pages/WikiPage'
 import { WorkspacePage } from '@/pages/WorkspacePage'
+import { GraphPage } from '@/pages/GraphPage'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuth()
@@ -57,6 +58,16 @@ export default function App() {
               <ProtectedRoute>
                 <AppLayout>
                   <WorkspacePage />
+                </AppLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/graph"
+            element={
+              <ProtectedRoute>
+                <AppLayout>
+                  <GraphPage />
                 </AppLayout>
               </ProtectedRoute>
             }

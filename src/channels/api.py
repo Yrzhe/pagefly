@@ -776,6 +776,47 @@ async def delete_workspace_folder(folder_name: str):
     return {"status": "ok"}
 
 
+# ── Knowledge Graph ──
+
+@app.get("/api/graph", dependencies=[Depends(verify_token)])
+async def get_knowledge_graph():
+    """Build a graph of documents and wiki articles with their references."""
+    conn = db.get_connection()
+    docs = conn.execute("SELECT id, title, category, subcategory, status FROM documents").fetchall()
+    wikis = conn.execute("SELECT id, title, article_type, source_document_ids FROM wiki_articles").fetchall()
+    conn.close()
+
+    nodes = []
+    edges = []
+
+    for d in docs:
+        nodes.append({
+            "id": d["id"],
+            "label": d["title"] or d["id"][:8],
+            "type": "document",
+            "category": d["category"] or "",
+            "subcategory": d["subcategory"] or "",
+        })
+
+    for w in wikis:
+        nodes.append({
+            "id": w["id"],
+            "label": w["title"] or w["id"][:8],
+            "type": "wiki",
+            "article_type": w["article_type"] or "",
+        })
+        # Edges from wiki to source documents
+        source_ids = []
+        try:
+            source_ids = json.loads(w["source_document_ids"] or "[]")
+        except (json.JSONDecodeError, TypeError):
+            pass
+        for src_id in source_ids:
+            edges.append({"source": src_id, "target": w["id"], "relation": "compiled_from"})
+
+    return {"nodes": nodes, "edges": edges}
+
+
 # ── Tokens (master token required) ──
 
 @app.get("/api/tokens", dependencies=[Depends(verify_master_token)])
