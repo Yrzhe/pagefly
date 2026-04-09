@@ -53,6 +53,7 @@ export function KnowledgePage() {
   const [selectedDoc, setSelectedDoc] = useState<Document | null>(null)
   const [docContent, setDocContent] = useState('')
   const [filter, setFilter] = useState('')
+  const [searchResults, setSearchResults] = useState<Document[] | null>(null)
   const [loading, setLoading] = useState(true)
   const [expandedCats, setExpandedCats] = useState<Set<string>>(new Set())
 
@@ -68,6 +69,46 @@ export function KnowledgePage() {
   }, [])
 
   useEffect(() => { fetchDocuments() }, [fetchDocuments])
+
+  // Debounced full-text search via API
+  useEffect(() => {
+    if (filter.length < 2) {
+      setSearchResults(null)
+      return
+    }
+    const timer = setTimeout(async () => {
+      try {
+        const { data } = await api.post('/api/search', { keyword: filter })
+        // Map search results to Document-like objects
+        const mapped = (data.results || []).map((r: { id: string; title: string; type: string; path: string; snippet: string }) => {
+          // Try to find full doc info from loaded documents
+          const full = documents.find((d) => d.id === r.id)
+          if (full) return full
+          // Fallback: minimal doc object
+          return {
+            id: r.id,
+            title: r.title || r.path,
+            description: r.snippet || '',
+            category: r.type === 'wiki' ? 'wiki' : '',
+            subcategory: '',
+            status: '',
+            tags: '',
+            source_type: r.type,
+            relevance_score: 0,
+            temporal_type: '',
+            ingested_at: '',
+            classified_at: '',
+            current_path: '',
+            original_filename: '',
+          } as Document
+        })
+        setSearchResults(mapped)
+      } catch {
+        setSearchResults(null)
+      }
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [filter, documents])
 
   const selectDocument = useCallback(async (doc: Document) => {
     setSelectedDoc(doc)
@@ -88,15 +129,9 @@ export function KnowledgePage() {
     })
   }
 
-  const filtered = filter
-    ? documents.filter(
-        (d) =>
-          d.title.toLowerCase().includes(filter.toLowerCase()) ||
-          (d.tags || '').toLowerCase().includes(filter.toLowerCase())
-      )
-    : documents
+  const displayDocs = searchResults !== null ? searchResults : documents
 
-  const tree = buildTree(filtered)
+  const tree = buildTree(displayDocs)
 
   // Auto-expand first category and select first doc
   useEffect(() => {
