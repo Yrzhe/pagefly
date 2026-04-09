@@ -5,8 +5,9 @@ Your task is to classify the input document, assess its value, determine its tim
 ## Classification Rules
 
 1. You must choose category from the provided category list
-2. For subcategory: prefer existing subcategories from the list. If none fit well, you may propose a new one (use lowercase English with hyphens, e.g., "reinforcement-learning")
+2. For subcategory: **ALWAYS prefer existing subcategories** shown in the "Existing knowledge base structure" section. Place similar documents together. Only propose a new subcategory if no existing one fits at all (use lowercase English with hyphens, e.g., "reinforcement-learning")
 3. If the document doesn't fit any clear category, use "misc"
+4. subcategory can be empty string if the category has no meaningful subdivision
 4. title should be concise and accurate, reflecting the document's core content. Use the same language as the source document
 5. description should summarize the key information in one or two sentences. Use the same language as the source document
 6. tags: extract 3-5 keywords following these rules:

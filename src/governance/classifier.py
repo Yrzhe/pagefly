@@ -35,6 +35,45 @@ CLASSIFICATION_SCHEMA = {
 }
 
 
+def _build_existing_structure() -> str:
+    """Scan knowledge/ to build a snapshot of existing categories, subcategories, and article titles."""
+    from src.shared.config import KNOWLEDGE_DIR
+
+    if not KNOWLEDGE_DIR.exists():
+        return "No existing documents yet."
+
+    structure: dict[str, dict[str, list[str]]] = {}
+    for meta_path in KNOWLEDGE_DIR.rglob("metadata.json"):
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            cat = meta.get("category", "")
+            sub = meta.get("subcategory", "")
+            title = meta.get("title", "")
+            if not cat:
+                continue
+            if cat not in structure:
+                structure[cat] = {}
+            if sub not in structure[cat]:
+                structure[cat][sub] = []
+            if title and len(structure[cat][sub]) < 5:
+                structure[cat][sub].append(title)
+        except Exception:
+            continue
+
+    if not structure:
+        return "No existing documents yet."
+
+    lines = ["Existing knowledge base structure (use these categories/subcategories when possible):"]
+    for cat in sorted(structure):
+        for sub in sorted(structure[cat]):
+            titles = structure[cat][sub]
+            label = f"{cat}/{sub}" if sub else cat
+            titles_str = ", ".join(f'"{t}"' for t in titles[:3])
+            lines.append(f"  - {label} ({len(titles)} docs, e.g. {titles_str})")
+
+    return "\n".join(lines)
+
+
 def classify(content: str, max_chars: int = 2000) -> ClassificationResult:
     """
     Classify document content.
@@ -48,6 +87,7 @@ def classify(content: str, max_chars: int = 2000) -> ClassificationResult:
     system_prompt = load_prompt("classifier")
     categories_json = json.dumps(categories_data, ensure_ascii=False, indent=2)
     content_excerpt = content[:max_chars]
+    existing_structure = _build_existing_structure()
 
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY, base_url=ANTHROPIC_BASE_URL)
     valid_ids = {c["id"] for c in categories_data["categories"]}
@@ -60,7 +100,11 @@ def classify(content: str, max_chars: int = 2000) -> ClassificationResult:
             system=system_prompt,
             messages=[{
                 "role": "user",
-                "content": f"Categories:\n{categories_json}\n\nDocument content:\n{content_excerpt}",
+                "content": (
+                    f"Categories:\n{categories_json}\n\n"
+                    f"{existing_structure}\n\n"
+                    f"Document content:\n{content_excerpt}"
+                ),
             }],
             output_config={
                 "format": {
