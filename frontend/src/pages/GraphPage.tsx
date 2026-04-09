@@ -5,7 +5,7 @@ import remarkGfm from 'remark-gfm'
 import { forceSimulation, forceLink, forceManyBody, forceCenter, forceCollide, type SimulationNodeDatum, type SimulationLinkDatum } from 'd3-force'
 import { select } from 'd3-selection'
 import { zoom as d3Zoom, zoomIdentity } from 'd3-zoom'
-import { drag as d3Drag } from 'd3-drag'
+// d3-drag replaced with native pointer events for node dragging
 import api from '@/api/client'
 
 interface GNode extends SimulationNodeDatum {
@@ -171,54 +171,79 @@ export function GraphPage() {
 
         simRef.current = sim
 
-        // Zoom
+        // Hit test
+        const findNode = (px: number, py: number): GNode | undefined => {
+          const t = transformRef.current
+          const mx = (px - t.x) / t.k
+          const my = (py - t.y) / t.k
+          // Search in reverse for top-most node
+          for (let i = nodes.length - 1; i >= 0; i--) {
+            const n = nodes[i]
+            const r = n.type === 'wiki' ? 12 : 10
+            if (n.x != null && Math.hypot(n.x - mx, n.y! - my) < r) return n
+          }
+          return undefined
+        }
+
+        // Zoom (only when not on a node)
+        let isDraggingNode = false
         const zoomBehavior = d3Zoom<HTMLCanvasElement, unknown>()
           .scaleExtent([0.1, 6])
+          .filter((event) => {
+            // Allow wheel zoom always, but block pan if dragging a node
+            if (event.type === 'wheel') return true
+            if (isDraggingNode) return false
+            // Check if mouse is on a node — if so, don't start zoom pan
+            const node = findNode(event.offsetX, event.offsetY)
+            return !node
+          })
           .on('zoom', (event) => {
             transformRef.current = event.transform
             draw()
           })
         select(canvas).call(zoomBehavior)
 
-        // Drag
-        const findNode = (x: number, y: number): GNode | undefined => {
-          const t = transformRef.current
-          const mx = (x - t.x) / t.k
-          const my = (y - t.y) / t.k
-          return nodes.find(n => {
-            const r = n.type === 'wiki' ? 10 : 8
-            return n.x != null && Math.hypot(n.x - mx, n.y! - my) < r
-          })
-        }
-
+        // Drag nodes (only activate after mouse moves > 3px)
         let draggedNode: GNode | undefined
-        const dragBehavior = d3Drag<HTMLCanvasElement, unknown>()
-          .subject((event) => {
-            const node = findNode(event.x, event.y)
-            return node || null
-          })
-          .on('start', (event) => {
-            draggedNode = findNode(event.x, event.y)
-            if (!draggedNode) return
+        let dragStartPos = { x: 0, y: 0 }
+        let dragActivated = false
+
+        canvas.addEventListener('pointerdown', (event) => {
+          const node = findNode(event.offsetX, event.offsetY)
+          if (!node) return
+          draggedNode = node
+          dragStartPos = { x: event.offsetX, y: event.offsetY }
+          dragActivated = false
+          canvas.setPointerCapture(event.pointerId)
+        })
+        canvas.addEventListener('pointermove', (event) => {
+          if (!draggedNode) return
+          // Only activate drag after threshold (avoids triggering on click)
+          if (!dragActivated) {
+            const dist = Math.hypot(event.offsetX - dragStartPos.x, event.offsetY - dragStartPos.y)
+            if (dist < 3) return
+            dragActivated = true
+            isDraggingNode = true
             sim.alphaTarget(0.3).restart()
             draggedNode.fx = draggedNode.x
             draggedNode.fy = draggedNode.y
-          })
-          .on('drag', (event) => {
-            if (!draggedNode) return
-            const t = transformRef.current
-            draggedNode.fx = (event.x - t.x) / t.k
-            draggedNode.fy = (event.y - t.y) / t.k
-          })
-          .on('end', () => {
-            if (!draggedNode) return
+          }
+          const t = transformRef.current
+          draggedNode.fx = (event.offsetX - t.x) / t.k
+          draggedNode.fy = (event.offsetY - t.y) / t.k
+        })
+        const endDrag = () => {
+          if (draggedNode && dragActivated) {
             sim.alphaTarget(0)
             draggedNode.fx = null
             draggedNode.fy = null
-            draggedNode = undefined
-          })
-
-        select(canvas).call(dragBehavior as any)
+          }
+          draggedNode = undefined
+          dragActivated = false
+          isDraggingNode = false
+        }
+        canvas.addEventListener('pointerup', endDrag)
+        canvas.addEventListener('pointercancel', endDrag)
 
         // Click
         canvas.addEventListener('click', (event) => {
