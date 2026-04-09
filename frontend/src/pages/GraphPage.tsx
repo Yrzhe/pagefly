@@ -196,6 +196,37 @@ export function GraphPage() {
         wheelSensitivity: 0.3,
       })
 
+      // ── Drag physics: spring-like pull on connected nodes ──
+      let dragLayout: cytoscape.Layouts | null = null
+
+      cy.on('grab', 'node', () => {
+        // Stop any running drag layout
+        if (dragLayout) { dragLayout.stop(); dragLayout = null }
+      })
+
+      cy.on('free', 'node', (e) => {
+        const node = e.target
+        // Re-layout neighborhood around the dragged node
+        const neighborhood = node.neighborhood().nodes().union(node)
+        if (neighborhood.length <= 1) return
+
+        dragLayout = neighborhood.layout({
+          name: 'cose',
+          animate: true,
+          animationDuration: 300,
+          fit: false,
+          padding: 0,
+          nodeDimensionsIncludeLabels: true,
+          nodeRepulsion: () => 5000,
+          idealEdgeLength: () => 140,
+          edgeElasticity: () => 150,
+          gravity: 0.5,
+          numIter: 100,
+          randomize: false,
+        } as cytoscape.LayoutOptions)
+        dragLayout!.run()
+      })
+
       cy.on('tap', 'node', (e) => {
         const node = e.target
         const nodeData: GraphNode = {
