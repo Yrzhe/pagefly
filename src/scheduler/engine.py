@@ -108,12 +108,22 @@ async def _catchup_chat_archive() -> None:
 
     conn = database.get_connection()
     row = conn.execute(
-        "SELECT COUNT(*) FROM documents WHERE original_filename = ?",
-        (f"chat_{yesterday}.md",),
+        "SELECT COUNT(*) FROM documents WHERE original_filename LIKE ? OR ingested_at LIKE ?",
+        (f"chat_{yesterday}%", f"{yesterday}%"),
     ).fetchone()
     conn.close()
 
-    if row[0] == 0:
+    # Also check if there are any messages from yesterday worth archiving
+    all_sessions = database.load_all_sessions()
+    has_yesterday_msgs = False
+    for cid, msgs in all_sessions.items():
+        for m in msgs:
+            ts = m.get("ts", "")
+            if ts and yesterday in ts:
+                has_yesterday_msgs = True
+                break
+
+    if row[0] == 0 and has_yesterday_msgs:
         logger.info("Missed archive for %s detected, running catch-up...", yesterday)
         try:
             from src.channels.telegram import _save_daily_chat, _sessions
