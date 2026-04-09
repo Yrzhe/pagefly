@@ -51,11 +51,13 @@ _partial_sessions: dict[str, dict] = {}
 
 
 def _get_client_ip(request: Request) -> str:
-    """Extract client IP for rate limiting."""
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    return request.client.host if request.client else "unknown"
+    """Extract client IP for rate limiting. Only trust X-Forwarded-For from localhost (reverse proxy)."""
+    client_host = request.client.host if request.client else "unknown"
+    if client_host in ("127.0.0.1", "::1"):
+        forwarded = request.headers.get("x-forwarded-for")
+        if forwarded:
+            return forwarded.split(",")[0].strip()
+    return client_host
 
 
 def _cleanup_expired_sessions() -> None:

@@ -140,7 +140,7 @@ def verify_master_token(credentials: HTTPAuthorizationCredentials = Depends(secu
     """Verify master token only — for token management endpoints."""
     if not credentials:
         raise HTTPException(status_code=401, detail="Missing Authorization header")
-    if not API_MASTER_TOKEN or credentials.credentials != API_MASTER_TOKEN:
+    if not API_MASTER_TOKEN or not hmac.compare_digest(credentials.credentials, API_MASTER_TOKEN):
         raise HTTPException(status_code=403, detail="Master token required")
     return credentials
 
