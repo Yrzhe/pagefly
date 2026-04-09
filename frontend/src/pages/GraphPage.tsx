@@ -58,7 +58,13 @@ export function GraphPage() {
   const [highlightIds, setHighlightIds] = useState<Set<string>>(new Set())
   const [stats, setStats] = useState({ nodes: 0, edges: 0 })
 
-  // Draw
+  // Use refs for draw function so it doesn't trigger useEffect re-init
+  const selectedNodeRef = useRef<GNode | null>(null)
+  const highlightIdsRef = useRef<Set<string>>(new Set())
+  selectedNodeRef.current = selectedNode
+  highlightIdsRef.current = highlightIds
+
+  // Draw — reads from refs so it never causes useEffect re-init
   const draw = useCallback(() => {
     const canvas = canvasRef.current
     if (!canvas) return
@@ -67,20 +73,22 @@ export function GraphPage() {
     const t = transformRef.current
     const w = canvas.width
     const h = canvas.height
+    const currentHighlight = highlightIdsRef.current
+    const currentSelected = selectedNodeRef.current
 
     ctx.clearRect(0, 0, w, h)
     ctx.save()
     ctx.translate(t.x, t.y)
     ctx.scale(t.k, t.k)
 
-    const hasHighlight = highlightIds.size > 0
+    const hasHighlight = currentHighlight.size > 0
 
     // Edges
     for (const link of linksRef.current) {
       const s = link.source as GNode
       const tgt = link.target as GNode
       if (s.x == null || tgt.x == null) continue
-      const dimmed = hasHighlight && !highlightIds.has(s.id) && !highlightIds.has(tgt.id)
+      const dimmed = hasHighlight && !currentHighlight.has(s.id) && !currentHighlight.has(tgt.id)
       ctx.beginPath()
       ctx.moveTo(s.x, s.y!)
       ctx.lineTo(tgt.x, tgt.y!)
@@ -92,8 +100,8 @@ export function GraphPage() {
     // Nodes
     for (const node of nodesRef.current) {
       if (node.x == null) continue
-      const isSelected = selectedNode?.id === node.id
-      const dimmed = hasHighlight && !highlightIds.has(node.id)
+      const isSelected = currentSelected?.id === node.id
+      const dimmed = hasHighlight && !currentHighlight.has(node.id)
       const r = node.type === 'wiki' ? 7 : 5
       const color = nodeColor(node)
 
@@ -132,7 +140,7 @@ export function GraphPage() {
     }
 
     ctx.restore()
-  }, [selectedNode, highlightIds])
+  }, []) // stable — reads from refs
 
   // Init
   useEffect(() => {
@@ -266,6 +274,9 @@ export function GraphPage() {
       simRef.current?.stop()
     }
   }, [draw])
+
+  // Redraw when selection/highlight changes (without re-init)
+  useEffect(() => { draw() }, [selectedNode, highlightIds, draw])
 
   // Search highlight
   useEffect(() => {
