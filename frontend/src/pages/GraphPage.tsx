@@ -175,25 +175,32 @@ export function GraphPage() {
         }
       })
 
-      // Dynamic drag: brief physics sim when node is released
-      let dragLayout: cytoscape.Layouts | undefined
+      // Real-time physics while dragging
+      let liveLayout: cytoscape.Layouts | undefined
+      const colaOpts = {
+        name: 'cola',
+        animate: true,
+        infinite: true,
+        fit: false,
+        nodeDimensionsIncludeLabels: true,
+        edgeLength: 100,
+        nodeSpacing: 25,
+        handleDisconnected: true,
+        avoidOverlap: true,
+        ungrabifyWhileSimulating: false,
+        randomize: false,
+      } as cytoscape.LayoutOptions
+
+      cy.on('grab', 'node', () => {
+        // Start live physics on drag
+        liveLayout?.stop()
+        liveLayout = cy.layout(colaOpts)
+        liveLayout.run()
+      })
+
       cy.on('free', 'node', () => {
-        dragLayout?.stop()
-        dragLayout = cy.layout({
-          name: 'cola',
-          animate: true,
-          infinite: false,
-          maxSimulationTime: 800,
-          fit: false,
-          nodeDimensionsIncludeLabels: true,
-          edgeLength: 100,
-          nodeSpacing: 25,
-          handleDisconnected: true,
-          avoidOverlap: true,
-          ungrabifyWhileSimulating: false,
-          randomize: false,
-        } as cytoscape.LayoutOptions)
-        dragLayout.run()
+        // Stop physics 500ms after release (let it settle briefly)
+        setTimeout(() => { liveLayout?.stop() }, 500)
       })
 
       cyRef.current = cy
