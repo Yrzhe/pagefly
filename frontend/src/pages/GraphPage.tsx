@@ -180,18 +180,22 @@ export function GraphPage() {
           name: 'cola',
           animate: true,
           infinite: true,
-          fit: false,
+          fit: true,
           nodeDimensionsIncludeLabels: true,
-          edgeLength: 150,
-          nodeSpacing: 30,
-          padding: 50,
+          edgeLength: 120,
+          nodeSpacing: 40,
+          padding: 60,
           handleDisconnected: true,
-          convergenceThreshold: 0.01,
+          convergenceThreshold: 0.001,
+          // Force circular/compact shape
+          alignment: undefined,
+          avoidOverlap: true,
+          centerGraph: true,
+          flow: undefined,
         } as cytoscape.LayoutOptions,
-        // Smooth zoom
-        minZoom: 0.2,
-        maxZoom: 3,
-        wheelSensitivity: 0.3,
+        minZoom: 0.15,
+        maxZoom: 4,
+        wheelSensitivity: 0.25,
       })
 
       cy.on('tap', 'node', (e) => {
@@ -220,9 +224,6 @@ export function GraphPage() {
           cy.elements().removeClass('highlighted dimmed')
         }
       })
-
-      // Fit after initial layout settles
-      setTimeout(() => cy.fit(undefined, 50), 1500)
 
       cyRef.current = cy
     } catch {
@@ -296,7 +297,12 @@ export function GraphPage() {
 
   const handleZoomIn = () => { cyRef.current?.zoom(cyRef.current.zoom() * 1.3) }
   const handleZoomOut = () => { cyRef.current?.zoom(cyRef.current.zoom() / 1.3) }
-  const handleFit = () => { cyRef.current?.fit(undefined, 40) }
+  const handleFit = () => {
+    const cy = cyRef.current
+    if (!cy) return
+    cy.fit(undefined, 50)
+    cy.animate({ center: { eles: cy.nodes() }, duration: 300 })
+  }
 
   return (
     <div className="flex flex-col h-screen">
@@ -320,7 +326,7 @@ export function GraphPage() {
           <div className="flex gap-1">
             <button onClick={handleZoomIn} className="p-2 border border-border rounded-[6px] hover:bg-bg-secondary transition-colors"><ZoomIn size={14} className="text-text-secondary" /></button>
             <button onClick={handleZoomOut} className="p-2 border border-border rounded-[6px] hover:bg-bg-secondary transition-colors"><ZoomOut size={14} className="text-text-secondary" /></button>
-            <button onClick={handleFit} className="p-2 border border-border rounded-[6px] hover:bg-bg-secondary transition-colors"><Maximize2 size={14} className="text-text-secondary" /></button>
+            <button onClick={handleFit} title="Center graph" className="p-2 border border-border rounded-[6px] hover:bg-bg-secondary transition-colors"><Maximize2 size={14} className="text-text-secondary" /></button>
           </div>
         </div>
       </header>
