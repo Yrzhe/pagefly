@@ -2,8 +2,8 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { GitFork, Search, Maximize2, X, Expand, Pencil, Save } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import ForceGraph2D from 'react-force-graph-2d'
 import api from '@/api/client'
+import ForceGraph2D from 'react-force-graph-2d'
 
 interface GraphNode {
   id: string
@@ -249,15 +249,15 @@ export function GraphPage() {
               graphData={graphData as any}
               width={dimensions.width}
               height={dimensions.height}
-              nodeCanvasObject={paintNode}
-              nodePointerAreaPaint={(node: GraphNode, color: string, ctx: CanvasRenderingContext2D) => {
+              nodeCanvasObject={paintNode as any}
+              nodePointerAreaPaint={((node: GraphNode, color: string, ctx: CanvasRenderingContext2D) => {
                 const size = 8
                 ctx.fillStyle = color
                 ctx.beginPath()
                 ctx.arc(node.x!, node.y!, size, 0, 2 * Math.PI)
                 ctx.fill()
-              }}
-              onNodeClick={handleNodeClick}
+              }) as any}
+              onNodeClick={handleNodeClick as any}
               linkColor={() => '#D6D3D1'}
               linkWidth={1}
               linkDirectionalArrowLength={4}
