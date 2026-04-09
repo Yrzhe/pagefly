@@ -3,11 +3,7 @@ import { GitFork, Search, ZoomIn, ZoomOut, Maximize2, X, Expand, Pencil, Save } 
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import cytoscape from 'cytoscape'
-// @ts-expect-error no types
-import cola from 'cytoscape-cola'
 import api from '@/api/client'
-
-cytoscape.use(cola)
 
 interface GraphNode {
   id: string
@@ -176,26 +172,28 @@ export function GraphPage() {
             },
           },
         ],
+        // Use cose layout for circular shape, then allow manual dragging
         layout: {
-          name: 'cola',
+          name: 'cose',
           animate: true,
-          infinite: true,
+          animationDuration: 800,
           fit: true,
-          nodeDimensionsIncludeLabels: true,
-          edgeLength: 120,
-          nodeSpacing: 40,
           padding: 60,
-          handleDisconnected: true,
-          convergenceThreshold: 0.001,
-          // Force circular/compact shape
-          alignment: undefined,
-          avoidOverlap: true,
-          centerGraph: true,
-          flow: undefined,
+          nodeDimensionsIncludeLabels: true,
+          nodeRepulsion: () => 8000,
+          idealEdgeLength: () => 120,
+          edgeElasticity: () => 100,
+          gravity: 1,
+          numIter: 500,
+          randomize: false,
         } as cytoscape.LayoutOptions,
-        minZoom: 0.15,
-        maxZoom: 4,
-        wheelSensitivity: 0.25,
+        // Interaction
+        userZoomingEnabled: true,
+        userPanningEnabled: true,
+        boxSelectionEnabled: false,
+        minZoom: 0.1,
+        maxZoom: 5,
+        wheelSensitivity: 0.3,
       })
 
       cy.on('tap', 'node', (e) => {
@@ -295,13 +293,20 @@ export function GraphPage() {
     cyRef.current?.elements().removeClass('highlighted dimmed')
   }
 
-  const handleZoomIn = () => { cyRef.current?.zoom(cyRef.current.zoom() * 1.3) }
-  const handleZoomOut = () => { cyRef.current?.zoom(cyRef.current.zoom() / 1.3) }
+  const handleZoomIn = () => {
+    const cy = cyRef.current
+    if (!cy) return
+    cy.animate({ zoom: { level: cy.zoom() * 1.3, position: cy.extent() ? { x: (cy.extent().x1 + cy.extent().x2) / 2, y: (cy.extent().y1 + cy.extent().y2) / 2 } : { x: 0, y: 0 } }, duration: 200 })
+  }
+  const handleZoomOut = () => {
+    const cy = cyRef.current
+    if (!cy) return
+    cy.animate({ zoom: { level: cy.zoom() / 1.3, position: cy.extent() ? { x: (cy.extent().x1 + cy.extent().x2) / 2, y: (cy.extent().y1 + cy.extent().y2) / 2 } : { x: 0, y: 0 } }, duration: 200 })
+  }
   const handleFit = () => {
     const cy = cyRef.current
     if (!cy) return
-    cy.fit(undefined, 50)
-    cy.animate({ center: { eles: cy.nodes() }, duration: 300 })
+    cy.animate({ fit: { eles: cy.elements(), padding: 50 }, duration: 400 })
   }
 
   return (
