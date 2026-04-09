@@ -132,20 +132,22 @@ export function GraphPage() {
         layout: {
           name: 'cola',
           animate: true,
-          infinite: true,
+          infinite: false,
+          maxSimulationTime: 3000,
           fit: true,
           nodeDimensionsIncludeLabels: true,
           edgeLength: 100,
           nodeSpacing: 25,
           padding: 60,
           handleDisconnected: true,
-          convergenceThreshold: 0.001,
           avoidOverlap: true,
           centerGraph: true,
+          randomize: false,
+          ungrabifyWhileSimulating: false,
         } as cytoscape.LayoutOptions,
         minZoom: 0.1,
-        maxZoom: 4,
-        wheelSensitivity: 0.2,
+        maxZoom: 5,
+        wheelSensitivity: 0.3,
       })
 
       cy.on('tap', 'node', (e) => {
