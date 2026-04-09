@@ -398,6 +398,14 @@ async def write_wiki_article(args):
     from src.shared.activity_log import append_log
     append_log("compile", f"{mode}: {title}", f"type={article_type}, refs={len(valid_refs)}")
 
+    # Record in operations_log for dashboard trends
+    try:
+        from src.storage import db as _db
+        for src_id in valid_source_ids:
+            _db.log_operation(src_id, "wiki_compile", to_path=str(article_dir))
+    except Exception:
+        pass
+
     warnings = []
     if dropped_sources:
         warnings.append(f"Dropped {len(dropped_sources)} invalid source IDs")
