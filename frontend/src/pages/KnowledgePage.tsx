@@ -82,7 +82,9 @@ export function KnowledgePage() {
       try {
         const { data } = await api.post('/api/search', { keyword: filter })
         // Map search results to Document-like objects
-        const mapped = (data.results || []).map((r: { id: string; title: string; type: string; path: string; snippet: string }) => {
+        const mapped = (data.results || [])
+          .filter((r: { type: string }) => r.type === 'knowledge')
+          .map((r: { id: string; title: string; type: string; path: string; snippet: string }) => {
           // Try to find full doc info from loaded documents
           const full = documents.find((d) => d.id === r.id)
           if (full) return full
