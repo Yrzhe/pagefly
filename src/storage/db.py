@@ -1,6 +1,7 @@
 """Database connection and operations."""
 
 import sqlite3
+from collections.abc import Iterable
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -10,6 +11,35 @@ from src.shared.logger import get_logger
 logger = get_logger("storage.db")
 
 DB_PATH = DATA_DIR / "pagefly.db"
+_ALLOWED_DOC_COLUMNS = frozenset({
+    "title",
+    "description",
+    "source_type",
+    "original_filename",
+    "current_path",
+    "status",
+    "tags",
+    "category",
+    "subcategory",
+    "classified_at",
+    "metadata_json",
+})
+_ALLOWED_WIKI_COLUMNS = frozenset({
+    "title",
+    "article_type",
+    "file_path",
+    "summary",
+    "source_document_ids",
+    "updated_at",
+})
+_ALLOWED_TASK_COLUMNS = frozenset({
+    "name",
+    "cron_expr",
+    "prompt",
+    "enabled",
+    "task_type",
+    "updated_at",
+})
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS documents (
@@ -182,6 +212,16 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).astimezone().isoformat()
 
 
+def _build_update_sql(table: str, allowed_columns: Iterable[str], fields: dict) -> tuple[str, list]:
+    """Build a parameterized UPDATE statement after validating column names."""
+    invalid = sorted(set(fields) - set(allowed_columns))
+    if invalid:
+        raise ValueError(f"Invalid {table} columns: {', '.join(invalid)}")
+
+    set_clause = ", ".join(f"{column} = ?" for column in fields)
+    return f"UPDATE {table} SET {set_clause} WHERE id = ?", list(fields.values())
+
+
 def insert_document(
     doc_id: str,
     source_type: str,
@@ -205,12 +245,13 @@ def update_document(doc_id: str, **fields) -> None:
     """Update document fields by ID."""
     if not fields:
         return
-    set_clause = ", ".join(f"{k} = ?" for k in fields)
-    values = list(fields.values()) + [doc_id]
+    query, values = _build_update_sql("documents", _ALLOWED_DOC_COLUMNS, fields)
     conn = get_connection()
-    conn.execute(f"UPDATE documents SET {set_clause} WHERE id = ?", values)
-    conn.commit()
-    conn.close()
+    try:
+        conn.execute(query, [*values, doc_id])
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def get_document(doc_id: str) -> dict | None:
@@ -265,12 +306,13 @@ def update_wiki_article(article_id: str, **fields) -> None:
     if not fields:
         return
     fields["updated_at"] = now_iso()
-    set_clause = ", ".join(f"{k} = ?" for k in fields)
-    values = list(fields.values()) + [article_id]
+    query, values = _build_update_sql("wiki_articles", _ALLOWED_WIKI_COLUMNS, fields)
     conn = get_connection()
-    conn.execute(f"UPDATE wiki_articles SET {set_clause} WHERE id = ?", values)
-    conn.commit()
-    conn.close()
+    try:
+        conn.execute(query, [*values, article_id])
+        conn.commit()
+    finally:
+        conn.close()
 
 
 # ── Scheduled Tasks ──
@@ -296,12 +338,13 @@ def update_scheduled_task(task_id: str, **fields) -> None:
     if not fields:
         return
     fields["updated_at"] = now_iso()
-    set_clause = ", ".join(f"{k} = ?" for k in fields)
-    values = list(fields.values()) + [task_id]
+    query, values = _build_update_sql("scheduled_tasks", _ALLOWED_TASK_COLUMNS, fields)
     conn = get_connection()
-    conn.execute(f"UPDATE scheduled_tasks SET {set_clause} WHERE id = ?", values)
-    conn.commit()
-    conn.close()
+    try:
+        conn.execute(query, [*values, task_id])
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def list_scheduled_tasks(enabled_only: bool = False) -> list[dict]:

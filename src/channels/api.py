@@ -1,6 +1,7 @@
 """REST API — FastAPI interface for PageFly."""
 
 import asyncio
+import hmac
 import json
 import tempfile
 from pathlib import Path
@@ -23,6 +24,9 @@ from src.storage import db
 logger = get_logger("channels.api")
 
 app = FastAPI(title="PageFly API", version="0.1.0")
+
+from src.auth.routes import router as auth_router
+app.include_router(auth_router)
 
 from fastapi.middleware.cors import CORSMiddleware
 from src.shared.config import FRONTEND_ORIGIN
@@ -110,14 +114,19 @@ _temp_files: list[Path] = []
 # ── Auth ──
 
 def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    """Verify Bearer token — accepts master token or any DB token."""
+    """Verify Bearer token — accepts JWT session, master token, or DB token."""
     if not credentials:
         raise HTTPException(status_code=401, detail="Missing Authorization header")
 
     token = credentials.credentials
 
+    # Check JWT session token (from login flow)
+    from src.auth.service import verify_jwt
+    if verify_jwt(token) is not None:
+        return credentials
+
     # Check master token
-    if API_MASTER_TOKEN and token == API_MASTER_TOKEN:
+    if API_MASTER_TOKEN and hmac.compare_digest(token, API_MASTER_TOKEN):
         return credentials
 
     # Check DB tokens
@@ -174,7 +183,7 @@ async def ingest_file(file: UploadFile = File(...)):
             original_filename=file.filename,
         )
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         doc_id = await loop.run_in_executor(None, ingest, input_data)
 
         if doc_id:

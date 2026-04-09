@@ -1,9 +1,8 @@
 import { createContext, useContext, useState, useCallback, type ReactNode } from 'react'
-import api from '@/api/client'
 
 interface AuthContextType {
   isAuthenticated: boolean
-  login: (account: string, password: string, totp: string) => Promise<void>
+  setToken: (token: string) => void
   logout: () => void
 }
 
@@ -14,9 +13,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     () => !!localStorage.getItem('pagefly_token')
   )
 
-  const login = useCallback(async (account: string, password: string, totp: string) => {
-    const { data } = await api.post('/auth/login', { account, password, totp })
-    localStorage.setItem('pagefly_token', data.token)
+  const setToken = useCallback((token: string) => {
+    localStorage.setItem('pagefly_token', token)
     setIsAuthenticated(true)
   }, [])
 
@@ -26,7 +24,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   return (
-    <AuthContext.Provider value={{ isAuthenticated, login, logout }}>
+    <AuthContext.Provider value={{ isAuthenticated, setToken, logout }}>
       {children}
     </AuthContext.Provider>
   )

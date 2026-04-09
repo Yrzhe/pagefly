@@ -63,11 +63,13 @@ export function LandingPage() {
       {/* Nav */}
       <nav className="sticky top-0 z-50 bg-bg-primary/80 backdrop-blur-md border-b border-border/50">
         <div className="flex items-center justify-between px-5 md:px-8 py-3 md:py-4 max-w-6xl mx-auto">
-          <a href="/" className="flex items-center gap-2.5">
-            <img src="/logo.png" alt="PageFly" className="h-7 w-7 md:h-8 md:w-8 rounded-lg" />
-            <span className="font-heading text-base md:text-lg font-bold text-text-primary">PageFly</span>
+          <div className="flex items-center gap-2.5">
+            <a href="/" className="flex items-center gap-2.5">
+              <img src="/logo.png" alt="PageFly" className="h-7 w-7 md:h-8 md:w-8 rounded-lg" />
+              <span className="font-heading text-base md:text-lg font-bold text-text-primary">PageFly</span>
+            </a>
             <a href="https://x.com/yrzhe_top" target="_blank" rel="noopener noreferrer" className="text-[10px] text-text-tertiary hidden md:inline hover:text-accent-secondary transition-colors">by <span className="text-accent-secondary">yrzhe</span></a>
-          </a>
+          </div>
           <div className="flex items-center gap-2">
             <a href="https://github.com/Yrzhe/pagefly" target="_blank" rel="noopener noreferrer" className="text-[9px] md:text-[10px] font-mono text-text-tertiary border border-border px-1.5 py-0.5 rounded hover:text-accent-secondary hover:border-accent-secondary transition-colors">MIT</a>
             <span className="text-[10px] md:text-xs font-medium text-accent-secondary bg-bg-tertiary px-2.5 py-1 md:px-3 md:py-1.5 rounded-full">

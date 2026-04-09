@@ -205,10 +205,9 @@ async def _cmd_save(update: Update, context) -> None:
             file_path=str(tmp_path),
             original_filename=tmp_path.name,
         )
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         doc_id = await loop.run_in_executor(None, ingest, input_data)
     except Exception as e:
-        logger.error("Failed to save memo: %s", e)
         logger.error("Failed to save memo: %s", e)
         await update.message.reply_text("Failed to save memo. Please try again.")
         return
@@ -627,7 +626,7 @@ async def _save_daily_chat(context) -> None:
                 file_path=str(tmp_path),
                 original_filename=f"chat_{today}.md",
             )
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             doc_id = await loop.run_in_executor(None, ingest, input_data)
             if doc_id:
                 logger.info("Daily chat archived via pipeline: %s (%d messages)", today, len(today_msgs))

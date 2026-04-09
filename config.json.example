@@ -47,6 +47,14 @@
     "master_token": "your-master-token-change-this",
     "max_upload_mb": 50
   },
+  "auth": {
+    "account": "you@example.com",
+    "password_hash": "",
+    "totp_secret": "",
+    "resend_api_key": "",
+    "jwt_secret": "",
+    "jwt_expiry_hours": 24
+  },
   "app": {
     "log_level": "INFO"
   }

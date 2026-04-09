@@ -89,7 +89,7 @@ async def _run_organize() -> None:
     """Process any documents in raw/ that need organizing."""
     try:
         from src.governance.organizer import scan_and_organize
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         processed = await loop.run_in_executor(None, scan_and_organize)
         if processed:
             await notify(f"Organized {len(processed)} document(s) from raw/ to knowledge/.")
@@ -138,7 +138,7 @@ async def _run_workspace_organize() -> None:
     logger.info("Scheduled workspace organize starting...")
     try:
         from src.governance.workspace_organizer import organize_workspace
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(None, organize_workspace)
         if result["deleted"] + result["ingested"] > 0:
             summary = f"Workspace organized: {result['deleted']} deleted, {result['ingested']} ingested, {result['kept']} kept"

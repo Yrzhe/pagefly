@@ -82,7 +82,9 @@ async def list_knowledge_docs(args):
 async def read_document(args):
     """Read a document's content from knowledge/."""
     rel_path = args["path"]
-    doc_dir = KNOWLEDGE_DIR / rel_path
+    doc_dir = (KNOWLEDGE_DIR / rel_path).resolve()
+    if not doc_dir.is_relative_to(KNOWLEDGE_DIR.resolve()):
+        return {"content": [{"type": "text", "text": "Error: path outside knowledge/"}]}
     md_path = doc_dir / "document.md"
 
     if not md_path.exists():
@@ -1009,23 +1011,31 @@ async def delete_document(args):
     {"sql": str},
 )
 async def query_database(args):
-    """Run a read-only SQL query with table whitelist."""
+    """Run a read-only SQL query with table allowlist."""
     from src.storage.db import get_connection
 
     ALLOWED_TABLES = {"documents", "operations_log", "wiki_articles", "scheduled_tasks", "chat_sessions"}
-    BLOCKED_TABLES = {"api_tokens", "custom_prompts"}
+    BLOCKED_PATTERNS = {"API_TOKENS", "CUSTOM_PROMPTS", "SQLITE_MASTER", "PRAGMA", "ATTACH", "DETACH"}
 
     sql = args["sql"].strip()
+    sql_upper = sql.upper()
 
     # Safety: only allow SELECT
-    if not sql.upper().startswith("SELECT"):
+    if not sql_upper.startswith("SELECT"):
         return {"content": [{"type": "text", "text": "Error: only SELECT queries are allowed"}]}
 
-    # Safety: block access to sensitive tables
-    sql_upper = sql.upper()
-    for blocked in BLOCKED_TABLES:
-        if blocked.upper() in sql_upper:
-            return {"content": [{"type": "text", "text": f"Error: access to {blocked} table is not allowed"}]}
+    # Safety: block dangerous patterns
+    for pattern in BLOCKED_PATTERNS:
+        if pattern in sql_upper:
+            return {"content": [{"type": "text", "text": f"Error: '{pattern.lower()}' is not allowed"}]}
+
+    # Safety: verify only allowed tables are referenced
+    import re
+    referenced = set(re.findall(r'\bFROM\s+(\w+)|\bJOIN\s+(\w+)', sql_upper))
+    table_names = {t for pair in referenced for t in pair if t}
+    unauthorized = table_names - {t.upper() for t in ALLOWED_TABLES}
+    if unauthorized:
+        return {"content": [{"type": "text", "text": f"Error: unauthorized tables: {unauthorized}"}]}
 
     try:
         conn = get_connection()

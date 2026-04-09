@@ -36,7 +36,7 @@ async def _process_file(file_path: Path) -> None:
             )
 
             # Run ingest in thread pool (it's sync)
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             doc_id = await loop.run_in_executor(None, ingest, input_data)
 
             if doc_id:
