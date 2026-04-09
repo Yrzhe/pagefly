@@ -588,119 +588,191 @@ async def delete_prompt_api(name: str):
 from src.shared.config import WORKSPACE_DIR, RAW_DIR
 
 @app.get("/api/workspace", dependencies=[Depends(verify_token)])
-async def list_workspace_files():
-    """List all files in workspace/."""
+async def list_workspace_folders():
+    """List workspace folders (each has document.md + optional images/)."""
     WORKSPACE_DIR.mkdir(parents=True, exist_ok=True)
-    files = []
-    for p in sorted(WORKSPACE_DIR.rglob("*")):
-        if p.is_file():
-            rel = p.relative_to(WORKSPACE_DIR)
-            files.append({
-                "path": str(rel),
+    folders = []
+    for p in sorted(WORKSPACE_DIR.iterdir()):
+        if p.is_dir() and (p / "document.md").exists():
+            md = p / "document.md"
+            images_dir = p / "images"
+            image_count = len(list(images_dir.iterdir())) if images_dir.is_dir() else 0
+            folders.append({
                 "name": p.name,
-                "size": p.stat().st_size,
-                "modified": p.stat().st_mtime,
+                "size": md.stat().st_size,
+                "modified": md.stat().st_mtime,
+                "image_count": image_count,
             })
-    return {"files": files}
+    return {"folders": folders}
 
 
-@app.get("/api/workspace/{file_path:path}", dependencies=[Depends(verify_token)])
-async def read_workspace_file(file_path: str):
-    """Read a workspace file's content."""
-    target = (WORKSPACE_DIR / file_path).resolve()
-    if not target.is_relative_to(WORKSPACE_DIR.resolve()):
+@app.get("/api/workspace/{folder_name}/content", dependencies=[Depends(verify_token)])
+async def read_workspace_content(folder_name: str):
+    """Read document.md from a workspace folder."""
+    folder = (WORKSPACE_DIR / folder_name).resolve()
+    if not folder.is_relative_to(WORKSPACE_DIR.resolve()):
         raise HTTPException(status_code=403, detail="Invalid path")
-    if not target.exists():
-        raise HTTPException(status_code=404, detail="File not found")
-    if target.suffix in (".png", ".jpg", ".jpeg", ".gif", ".webp"):
-        return FileResponse(str(target))
-    return {"content": target.read_text(encoding="utf-8", errors="replace"), "path": file_path}
+    md_path = folder / "document.md"
+    if not md_path.exists():
+        raise HTTPException(status_code=404, detail="Not found")
+    return {"content": md_path.read_text(encoding="utf-8"), "name": folder_name}
 
 
-@app.post("/api/workspace/move-to-raw/{file_path:path}", dependencies=[Depends(verify_token)])
-async def move_workspace_to_raw(file_path: str):
-    """Move a workspace file to raw/ for ingest pipeline processing."""
+@app.put("/api/workspace/{folder_name}/content", dependencies=[Depends(verify_token)])
+async def update_workspace_content(folder_name: str, body: dict):
+    """Update document.md content."""
+    folder = (WORKSPACE_DIR / folder_name).resolve()
+    if not folder.is_relative_to(WORKSPACE_DIR.resolve()):
+        raise HTTPException(status_code=403, detail="Invalid path")
+    md_path = folder / "document.md"
+    if not md_path.exists():
+        raise HTTPException(status_code=404, detail="Not found")
+    md_path.write_text(body.get("content", ""), encoding="utf-8")
+    return {"status": "ok"}
+
+
+@app.get("/api/workspace/{folder_name}/images", dependencies=[Depends(verify_token)])
+async def list_workspace_images(folder_name: str):
+    """List images in a workspace folder."""
+    images_dir = (WORKSPACE_DIR / folder_name / "images").resolve()
+    if not images_dir.is_relative_to(WORKSPACE_DIR.resolve()):
+        raise HTTPException(status_code=403, detail="Invalid path")
+    if not images_dir.is_dir():
+        return {"images": []}
+    return {"images": [
+        {"name": f.name, "size": f.stat().st_size}
+        for f in sorted(images_dir.iterdir()) if f.is_file()
+    ]}
+
+
+@app.post("/api/workspace/{folder_name}/images", dependencies=[Depends(verify_token)])
+async def upload_workspace_image(folder_name: str, file: UploadFile = File(...)):
+    """Upload an image to a workspace folder's images/ dir."""
+    images_dir = (WORKSPACE_DIR / folder_name / "images").resolve()
+    if not images_dir.is_relative_to(WORKSPACE_DIR.resolve()):
+        raise HTTPException(status_code=403, detail="Invalid path")
+    images_dir.mkdir(parents=True, exist_ok=True)
+    safe_name = Path(file.filename or "image.png").name
+    target = images_dir / safe_name
+    target.write_bytes(await file.read())
+    return {"status": "ok", "name": safe_name, "markdown": f"![{safe_name}](images/{safe_name})"}
+
+
+@app.get("/api/workspace/{folder_name}/images/{image_name}")
+async def serve_workspace_image(
+    folder_name: str, image_name: str,
+    token: str = Query(default=""),
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+):
+    """Serve a workspace image (supports token query param for img tags)."""
+    auth_token = credentials.credentials if credentials else token
+    if not auth_token:
+        raise HTTPException(status_code=401, detail="Missing token")
+    from src.auth.service import verify_jwt
+    if not (verify_jwt(auth_token) or (API_MASTER_TOKEN and hmac.compare_digest(auth_token, API_MASTER_TOKEN)) or db.validate_api_token(auth_token)):
+        raise HTTPException(status_code=401, detail="Invalid token")
+    target = (WORKSPACE_DIR / folder_name / "images" / image_name).resolve()
+    if not target.is_relative_to(WORKSPACE_DIR.resolve()) or not target.exists():
+        raise HTTPException(status_code=404, detail="Not found")
+    return FileResponse(str(target))
+
+
+@app.delete("/api/workspace/{folder_name}/images/{image_name}", dependencies=[Depends(verify_token)])
+async def delete_workspace_image(folder_name: str, image_name: str):
+    """Delete an image from a workspace folder."""
+    target = (WORKSPACE_DIR / folder_name / "images" / image_name).resolve()
+    if not target.is_relative_to(WORKSPACE_DIR.resolve()) or not target.exists():
+        raise HTTPException(status_code=404, detail="Not found")
+    target.unlink()
+    return {"status": "ok"}
+
+
+@app.post("/api/workspace/{folder_name}/ingest", dependencies=[Depends(verify_token)])
+async def ingest_workspace_folder(folder_name: str):
+    """Ingest a workspace folder (document.md + images/) into the pipeline."""
     import shutil
-    source = (WORKSPACE_DIR / file_path).resolve()
-    if not source.is_relative_to(WORKSPACE_DIR.resolve()):
+    folder = (WORKSPACE_DIR / folder_name).resolve()
+    if not folder.is_relative_to(WORKSPACE_DIR.resolve()):
         raise HTTPException(status_code=403, detail="Invalid path")
-    if not source.exists():
-        raise HTTPException(status_code=404, detail="File not found")
-    dest = RAW_DIR / source.name
-    RAW_DIR.mkdir(parents=True, exist_ok=True)
-    shutil.move(str(source), str(dest))
-    # Trigger ingest
-    from src.ingest.pipeline import ingest
+    if not folder.is_dir():
+        raise HTTPException(status_code=404, detail="Folder not found")
+    md_path = folder / "document.md"
+    if not md_path.exists():
+        raise HTTPException(status_code=400, detail="No document.md in folder")
+
+    # Ingest the markdown through pipeline
+    from src.ingest.pipeline import ingest as run_ingest
     from src.shared.types import IngestInput
+
     loop = asyncio.get_running_loop()
-    doc_id = await loop.run_in_executor(None, ingest, IngestInput(type="file", file_path=str(dest), original_filename=source.name))
-    return {"status": "ok", "doc_id": doc_id, "message": f"Moved {file_path} to ingest pipeline"}
+    doc_id = await loop.run_in_executor(
+        None, run_ingest,
+        IngestInput(type="file", file_path=str(md_path), original_filename=f"{folder_name}.md"),
+    )
+
+    if not doc_id:
+        raise HTTPException(status_code=500, detail="Ingest failed")
+
+    # Copy images/ into the newly created doc folder
+    ws_images = folder / "images"
+    if ws_images.is_dir() and any(ws_images.iterdir()):
+        doc = db.get_document(doc_id)
+        if doc:
+            doc_images = Path(doc["current_path"]) / "images"
+            doc_images.mkdir(parents=True, exist_ok=True)
+            for img in ws_images.iterdir():
+                if img.is_file():
+                    shutil.copy2(str(img), str(doc_images / img.name))
+
+    # Remove workspace folder
+    shutil.rmtree(str(folder), ignore_errors=True)
+    return {"status": "ok", "doc_id": doc_id, "folder": folder_name}
 
 
 @app.post("/api/workspace", dependencies=[Depends(verify_token)])
-async def create_workspace_file(body: dict):
-    """Create a new file in workspace."""
+async def create_workspace_folder(body: dict):
+    """Create a new workspace folder with document.md."""
     name = body.get("name", "").strip()
-    content = body.get("content", "")
     if not name:
         raise HTTPException(status_code=400, detail="Name required")
-    # Sanitize name
-    safe_name = Path(name).name
-    target = (WORKSPACE_DIR / safe_name).resolve()
-    if not target.is_relative_to(WORKSPACE_DIR.resolve()):
+    safe_name = "".join(c for c in name if c.isalnum() or c in " -_\u4e00-\u9fff").strip()
+    if not safe_name:
+        raise HTTPException(status_code=400, detail="Invalid name")
+    folder = (WORKSPACE_DIR / safe_name).resolve()
+    if not folder.is_relative_to(WORKSPACE_DIR.resolve()):
         raise HTTPException(status_code=403, detail="Invalid path")
-    WORKSPACE_DIR.mkdir(parents=True, exist_ok=True)
-    target.write_text(content, encoding="utf-8")
-    return {"status": "ok", "path": safe_name}
+    folder.mkdir(parents=True, exist_ok=True)
+    md_path = folder / "document.md"
+    if not md_path.exists():
+        md_path.write_text(f"# {name}\n\n", encoding="utf-8")
+    return {"status": "ok", "name": safe_name}
 
 
-@app.put("/api/workspace/{file_path:path}", dependencies=[Depends(verify_token)])
-async def update_workspace_file(file_path: str, body: dict):
-    """Update workspace file content or rename."""
-    target = (WORKSPACE_DIR / file_path).resolve()
-    if not target.is_relative_to(WORKSPACE_DIR.resolve()):
-        raise HTTPException(status_code=403, detail="Invalid path")
-    if not target.exists():
-        raise HTTPException(status_code=404, detail="File not found")
-
-    # Rename
-    new_name = body.get("name")
-    if new_name and new_name != target.name:
-        safe_name = Path(new_name).name
-        new_target = (WORKSPACE_DIR / safe_name).resolve()
-        if not new_target.is_relative_to(WORKSPACE_DIR.resolve()):
-            raise HTTPException(status_code=403, detail="Invalid name")
-        target.rename(new_target)
-        target = new_target
-
-    # Update content
-    content = body.get("content")
-    if content is not None:
-        target.write_text(content, encoding="utf-8")
-
-    return {"status": "ok", "path": str(target.relative_to(WORKSPACE_DIR))}
+@app.put("/api/workspace/{folder_name}", dependencies=[Depends(verify_token)])
+async def rename_workspace_folder(folder_name: str, body: dict):
+    """Rename a workspace folder."""
+    new_name = body.get("name", "").strip()
+    if not new_name:
+        raise HTTPException(status_code=400, detail="Name required")
+    safe_name = "".join(c for c in new_name if c.isalnum() or c in " -_\u4e00-\u9fff").strip()
+    folder = (WORKSPACE_DIR / folder_name).resolve()
+    if not folder.is_relative_to(WORKSPACE_DIR.resolve()) or not folder.is_dir():
+        raise HTTPException(status_code=404, detail="Folder not found")
+    new_folder = (WORKSPACE_DIR / safe_name).resolve()
+    if not new_folder.is_relative_to(WORKSPACE_DIR.resolve()):
+        raise HTTPException(status_code=403, detail="Invalid name")
+    folder.rename(new_folder)
+    return {"status": "ok", "name": safe_name}
 
 
-@app.post("/api/workspace/upload", dependencies=[Depends(verify_token)])
-async def upload_to_workspace(file: UploadFile = File(...)):
-    """Upload a file to workspace (not ingest)."""
-    WORKSPACE_DIR.mkdir(parents=True, exist_ok=True)
-    safe_name = Path(file.filename or "upload").name
-    target = WORKSPACE_DIR / safe_name
-    content = await file.read()
-    target.write_bytes(content)
-    return {"status": "ok", "path": safe_name, "size": len(content)}
-
-
-@app.delete("/api/workspace/{file_path:path}", dependencies=[Depends(verify_token)])
-async def delete_workspace_file(file_path: str):
-    """Delete a workspace file."""
-    target = (WORKSPACE_DIR / file_path).resolve()
-    if not target.is_relative_to(WORKSPACE_DIR.resolve()):
-        raise HTTPException(status_code=403, detail="Invalid path")
-    if not target.exists():
-        raise HTTPException(status_code=404, detail="File not found")
-    target.unlink()
+@app.delete("/api/workspace/{folder_name}", dependencies=[Depends(verify_token)])
+async def delete_workspace_folder(folder_name: str):
+    """Delete an entire workspace folder."""
+    import shutil
+    folder = (WORKSPACE_DIR / folder_name).resolve()
+    if not folder.is_relative_to(WORKSPACE_DIR.resolve()) or not folder.is_dir():
+        raise HTTPException(status_code=404, detail="Folder not found")
+    shutil.rmtree(str(folder), ignore_errors=True)
     return {"status": "ok"}
 
 
