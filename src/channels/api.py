@@ -885,6 +885,24 @@ async def get_stats():
     }
 
 
+# ── Activity ──
+
+@app.get("/api/activity", dependencies=[Depends(verify_token)])
+async def get_activity(limit: int = Query(default=30)):
+    """Get recent operations log."""
+    conn = db.get_connection()
+    rows = conn.execute(
+        """SELECT o.id, o.document_id, o.operation, o.from_path, o.to_path, o.created_at,
+                  d.title as doc_title
+           FROM operations_log o
+           LEFT JOIN documents d ON o.document_id = d.id
+           ORDER BY o.created_at DESC LIMIT ?""",
+        (min(limit, 100),),
+    ).fetchall()
+    conn.close()
+    return {"activity": [dict(r) for r in rows]}
+
+
 # ── Helpers ──
 
 def _temp_file_response(file_path: Path, media_type: str) -> FileResponse:
