@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { GitFork, Search, ZoomIn, ZoomOut, Maximize2, X } from 'lucide-react'
+import { GitFork, Search, ZoomIn, ZoomOut, Maximize2, X, Expand, Pencil, Save } from 'lucide-react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import cytoscape from 'cytoscape'
 import api from '@/api/client'
 
@@ -38,6 +40,11 @@ export function GraphPage() {
   const containerRef = useRef<HTMLDivElement>(null)
   const cyRef = useRef<cytoscape.Core | null>(null)
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null)
+  const [panelOpen, setPanelOpen] = useState(false)
+  const [panelContent, setPanelContent] = useState('')
+  const [editContent, setEditContent] = useState('')
+  const [panelMode, setPanelMode] = useState<'preview' | 'edit'>('preview')
+  const [panelSaving, setPanelSaving] = useState(false)
   const [search, setSearch] = useState('')
   const [stats, setStats] = useState({ nodes: 0, edges: 0 })
 
@@ -221,6 +228,44 @@ export function GraphPage() {
     }
   }, [search])
 
+  const openPanel = useCallback(async (node: GraphNode) => {
+    setPanelOpen(true)
+    setPanelMode('preview')
+    setPanelContent('Loading...')
+    try {
+      if (node.type === 'wiki') {
+        const { data } = await api.get(`/api/wiki/${node.id}`)
+        setPanelContent(data.content || '')
+        setEditContent(data.content || '')
+      } else {
+        const { data } = await api.get(`/api/documents/${node.id}`)
+        setPanelContent(data.content || '')
+        setEditContent(data.content || '')
+      }
+    } catch {
+      setPanelContent('Failed to load content.')
+    }
+  }, [])
+
+  const handlePanelSave = useCallback(async () => {
+    if (!selectedNode) return
+    setPanelSaving(true)
+    try {
+      if (selectedNode.type === 'document') {
+        await api.put(`/api/documents/${selectedNode.id}/content`, { content: editContent })
+      }
+      setPanelContent(editContent)
+      setPanelMode('preview')
+    } catch { /* silent */ }
+    finally { setPanelSaving(false) }
+  }, [selectedNode, editContent])
+
+  const closePanel = () => {
+    setPanelOpen(false)
+    setSelectedNode(null)
+    cyRef.current?.elements().removeClass('highlighted dimmed')
+  }
+
   const handleZoomIn = () => { cyRef.current?.zoom(cyRef.current.zoom() * 1.3) }
   const handleZoomOut = () => { cyRef.current?.zoom(cyRef.current.zoom() / 1.3) }
   const handleFit = () => { cyRef.current?.fit(undefined, 40) }
@@ -264,35 +309,81 @@ export function GraphPage() {
           <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-[#7C3AED] rotate-45" /> Connection</span>
         </div>
 
-        {/* Selected node panel */}
-        {selectedNode && (
-          <aside className="absolute top-4 right-4 w-[260px] bg-bg-secondary/95 backdrop-blur-sm border border-border rounded-[12px] p-4 shadow-lg">
-            <div className="flex items-start justify-between mb-3">
+        {/* Node info tooltip */}
+        {selectedNode && !panelOpen && (
+          <aside className="absolute top-4 right-4 w-[240px] bg-bg-secondary/95 backdrop-blur-sm border border-border rounded-[12px] p-4 shadow-lg">
+            <div className="flex items-start justify-between mb-2">
               <div className="flex-1 min-w-0">
                 <span className="text-[10px] font-bold uppercase tracking-[1px] text-accent-primary">
                   {selectedNode.type === 'wiki' ? selectedNode.article_type : 'Document'}
                 </span>
-                <h3 className="text-sm font-semibold text-text-primary mt-0.5 leading-snug">{selectedNode.label}</h3>
+                <h3 className="text-xs font-semibold text-text-primary mt-0.5 leading-snug">{selectedNode.label}</h3>
               </div>
               <button onClick={() => { setSelectedNode(null); cyRef.current?.elements().removeClass('highlighted dimmed') }} className="p-1 hover:bg-bg-tertiary rounded">
-                <X size={12} className="text-text-tertiary" />
+                <X size={11} className="text-text-tertiary" />
               </button>
             </div>
-            <div className="flex flex-col gap-1.5 text-[11px]">
+            <div className="flex flex-col gap-1 text-[10px] mb-3">
               <div className="flex justify-between">
                 <span className="text-text-tertiary">ID</span>
-                <span className="font-mono text-text-secondary">{selectedNode.id.slice(0, 12)}</span>
+                <span className="font-mono text-text-secondary">{selectedNode.id.slice(0, 10)}</span>
               </div>
               {selectedNode.category && (
                 <div className="flex justify-between">
                   <span className="text-text-tertiary">Category</span>
-                  <span className="text-text-secondary">{selectedNode.category}{selectedNode.subcategory ? ` / ${selectedNode.subcategory}` : ''}</span>
+                  <span className="text-text-secondary">{selectedNode.category}</span>
                 </div>
               )}
-              <div className="flex justify-between">
-                <span className="text-text-tertiary">Type</span>
-                <span className="text-text-secondary">{selectedNode.type}{selectedNode.article_type ? ` (${selectedNode.article_type})` : ''}</span>
+            </div>
+            <button
+              onClick={() => openPanel(selectedNode)}
+              className="w-full flex items-center justify-center gap-1.5 py-2 bg-accent-primary rounded-[6px] text-[11px] font-semibold text-bg-primary hover:bg-accent-secondary transition-colors"
+            >
+              <Expand size={12} /> Open Document
+            </button>
+          </aside>
+        )}
+
+        {/* Full content panel */}
+        {panelOpen && selectedNode && (
+          <aside className="absolute top-0 right-0 h-full w-[480px] bg-bg-primary border-l border-border shadow-lg flex flex-col z-10">
+            <div className="flex items-center justify-between px-5 py-3 border-b border-border flex-shrink-0">
+              <div className="flex-1 min-w-0">
+                <span className="text-[9px] font-bold uppercase tracking-[1px] text-accent-primary">
+                  {selectedNode.type === 'wiki' ? selectedNode.article_type : 'Document'}
+                </span>
+                <h3 className="text-sm font-semibold text-text-primary truncate">{selectedNode.label}</h3>
               </div>
+              <div className="flex items-center gap-1.5 flex-shrink-0">
+                {selectedNode.type === 'document' && (
+                  panelMode === 'edit' ? (
+                    <button onClick={handlePanelSave} disabled={panelSaving} className="flex items-center gap-1 px-2.5 py-1.5 bg-accent-primary rounded-[6px] text-[10px] font-semibold text-bg-primary hover:bg-accent-secondary transition-colors disabled:opacity-60">
+                      <Save size={10} /> {panelSaving ? '...' : 'Save'}
+                    </button>
+                  ) : (
+                    <button onClick={() => { setEditContent(panelContent); setPanelMode('edit') }} className="flex items-center gap-1 px-2.5 py-1.5 border border-border rounded-[6px] text-[10px] text-text-secondary hover:bg-bg-secondary transition-colors">
+                      <Pencil size={10} /> Edit
+                    </button>
+                  )
+                )}
+                <button onClick={closePanel} className="p-1.5 hover:bg-bg-secondary rounded transition-colors">
+                  <X size={14} className="text-text-tertiary" />
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 overflow-y-auto">
+              {panelMode === 'edit' ? (
+                <textarea
+                  value={editContent}
+                  onChange={(e) => setEditContent(e.target.value)}
+                  className="w-full h-full p-5 bg-bg-primary text-text-primary text-sm font-mono leading-relaxed outline-none resize-none"
+                  spellCheck={false}
+                />
+              ) : (
+                <article className="px-5 py-4 prose-pagefly">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{panelContent}</ReactMarkdown>
+                </article>
+              )}
             </div>
           </aside>
         )}
