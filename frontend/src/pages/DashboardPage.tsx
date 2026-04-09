@@ -93,7 +93,7 @@ export function DashboardPage() {
         <div className="grid grid-cols-4 gap-4">
           <StatCard icon={<FileText size={16} />} label="Documents" value={stats?.documents || 0} sub={`+${todayIngest} today`} onClick={() => navigate('/knowledge')} />
           <StatCard icon={<BookOpen size={16} />} label="Wiki Articles" value={stats?.wiki_articles || 0} sub={`+${todayWiki} today`} onClick={() => navigate('/wiki')} />
-          <StatCard icon={<Bot size={16} />} label="Agent Output (14d)" value={totalWiki14d} sub={`${totalIngest14d} ingested`} />
+          <StatCard icon={<Bot size={16} />} label="Operations (14d)" value={totalIngest14d + totalWiki14d} sub={`${totalIngest14d} ingest · ${totalWiki14d} wiki`} />
           <StatCard icon={<Calendar size={16} />} label="Schedules" value={stats?.scheduled_tasks || 0} sub="active tasks" />
         </div>
 
@@ -203,12 +203,16 @@ function TrendChart({ data }: { data: TrendDay[] }) {
     const w = rect.width
     const h = rect.height
 
-    const pad = { top: 10, right: 10, bottom: 24, left: 30 }
+    const pad = { top: 10, right: 20, bottom: 24, left: 30 }
     const cw = w - pad.left - pad.right
     const ch = h - pad.top - pad.bottom
 
     const maxVal = Math.max(1, ...data.map((d) => d.total))
-    const xStep = cw / Math.max(1, data.length - 1)
+    // Add inner margin so bars don't touch edges
+    const innerPad = 20
+    const usableW = cw - innerPad * 2
+    const xStep = data.length <= 1 ? 0 : usableW / (data.length - 1)
+    const xOffset = pad.left + innerPad
 
     ctx.clearRect(0, 0, w, h)
 
@@ -233,7 +237,7 @@ function TrendChart({ data }: { data: TrendDay[] }) {
     ctx.textAlign = 'center'
     data.forEach((d, i) => {
       if (i % 2 === 0 || i === data.length - 1) {
-        ctx.fillText(d.date.slice(5), pad.left + i * xStep, h - 4)
+        ctx.fillText(d.date.slice(5), xOffset + i * xStep, h - 4)
       }
     })
 
@@ -242,7 +246,7 @@ function TrendChart({ data }: { data: TrendDay[] }) {
       ctx.strokeStyle = color
       ctx.lineWidth = 1.5
       data.forEach((d, i) => {
-        const x = pad.left + i * xStep
+        const x = xOffset + i * xStep
         const y = pad.top + ch - (Number(d[key]) / maxVal) * ch
         if (i === 0) ctx.moveTo(x, y)
         else ctx.lineTo(x, y)
@@ -252,7 +256,7 @@ function TrendChart({ data }: { data: TrendDay[] }) {
 
     // Draw stacked bars
     data.forEach((d, i) => {
-      const x = pad.left + i * xStep - 4
+      const x = xOffset + i * xStep - 4
       const barW = 8
       let y = pad.top + ch
 
