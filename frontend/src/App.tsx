@@ -8,6 +8,7 @@ import { KnowledgePage } from '@/pages/KnowledgePage'
 import { WikiPage } from '@/pages/WikiPage'
 import { WorkspacePage } from '@/pages/WorkspacePage'
 import { GraphPage } from '@/pages/GraphPage'
+import { ApiPage } from '@/pages/ApiPage'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuth()
@@ -68,6 +69,16 @@ export default function App() {
               <ProtectedRoute>
                 <AppLayout>
                   <GraphPage />
+                </AppLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/api"
+            element={
+              <ProtectedRoute>
+                <AppLayout>
+                  <ApiPage />
                 </AppLayout>
               </ProtectedRoute>
             }
