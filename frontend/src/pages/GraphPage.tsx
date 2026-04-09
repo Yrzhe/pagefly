@@ -175,32 +175,34 @@ export function GraphPage() {
         }
       })
 
-      // Real-time physics while dragging
-      let liveLayout: cytoscape.Layouts | undefined
-      const colaOpts = {
-        name: 'cola',
-        animate: true,
-        infinite: true,
-        fit: false,
-        nodeDimensionsIncludeLabels: true,
-        edgeLength: 100,
-        nodeSpacing: 25,
-        handleDisconnected: true,
-        avoidOverlap: true,
-        ungrabifyWhileSimulating: false,
-        randomize: false,
-      } as cytoscape.LayoutOptions
-
-      cy.on('grab', 'node', (e) => {
-        e.target.lock()
-        liveLayout?.stop()
-        liveLayout = cy.layout(colaOpts)
-        liveLayout.run()
-      })
-
+      // Physics on drag release: node stays where you drop it, neighbors adjust
+      let dragLayout: cytoscape.Layouts | undefined
       cy.on('free', 'node', (e) => {
-        e.target.unlock()
-        setTimeout(() => { liveLayout?.stop() }, 500)
+        const node = e.target
+        const pos = node.position()
+        dragLayout?.stop()
+        // Lock the dragged node at its new position, run layout on everything else
+        node.lock()
+        dragLayout = cy.layout({
+          name: 'cola',
+          animate: true,
+          infinite: false,
+          maxSimulationTime: 1000,
+          fit: false,
+          nodeDimensionsIncludeLabels: true,
+          edgeLength: 100,
+          nodeSpacing: 25,
+          handleDisconnected: true,
+          avoidOverlap: true,
+          ungrabifyWhileSimulating: false,
+          randomize: false,
+        } as cytoscape.LayoutOptions)
+        dragLayout.run()
+        // Unlock after simulation settles
+        setTimeout(() => {
+          node.unlock()
+          node.position(pos)
+        }, 1100)
       })
 
       cyRef.current = cy
