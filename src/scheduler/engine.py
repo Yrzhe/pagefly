@@ -53,8 +53,23 @@ async def _run_review(review_type: str) -> None:
     try:
         from src.agents.review import run_review
         result = await run_review(review_type)
-        summary = result[:3500] + "..." if len(result) > 3500 else result
-        await notify(f"{review_type.title()} Review\n\n{summary}")
+
+        # Find the latest review article and send as file
+        from src.storage.db import get_connection
+        conn = get_connection()
+        row = conn.execute(
+            "SELECT file_path FROM wiki_articles WHERE article_type='review' ORDER BY created_at DESC LIMIT 1"
+        ).fetchone()
+        conn.close()
+
+        file_path = None
+        if row:
+            from pathlib import Path
+            md_path = Path(row["file_path"]) / "document.md"
+            if md_path.exists():
+                file_path = str(md_path)
+
+        await notify(f"{review_type.title()} Review completed", file_path=file_path)
     except Exception as e:
         logger.error("%s review failed: %s", review_type, e)
         await notify(f"{review_type.title()} review failed: {e}")
@@ -66,8 +81,22 @@ async def _run_lint() -> None:
     try:
         from src.agents.review import run_review
         result = await run_review("lint")
-        summary = result[:500] + "..." if len(result) > 500 else result
-        await notify(f"Wiki Lint Report\n\n{summary}")
+
+        from src.storage.db import get_connection
+        conn = get_connection()
+        row = conn.execute(
+            "SELECT file_path FROM wiki_articles WHERE article_type='lint' ORDER BY created_at DESC LIMIT 1"
+        ).fetchone()
+        conn.close()
+
+        file_path = None
+        if row:
+            from pathlib import Path
+            md_path = Path(row["file_path"]) / "document.md"
+            if md_path.exists():
+                file_path = str(md_path)
+
+        await notify("Wiki Lint Report completed", file_path=file_path)
     except Exception as e:
         logger.error("Wiki lint failed: %s", e)
         await notify(f"Wiki lint failed: {e}")
