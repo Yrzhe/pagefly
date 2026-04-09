@@ -19,9 +19,14 @@ interface Props {
 
 function rewriteImageUrls(markdown: string, docId: string): string {
   const token = localStorage.getItem('pagefly_token') || ''
+  const apiBase = import.meta.env.VITE_API_URL || ''
   return markdown.replace(
     /!\[([^\]]*)\]\((?!https?:\/\/)([^)]+)\)/g,
-    (_, alt, path) => `![${alt}](/api/documents/${docId}/files/${path}?token=${token})`
+    (_, alt, path) => {
+      // Strip leading ./ from path
+      const cleanPath = path.replace(/^\.\//, '')
+      return `![${alt}](${apiBase}/api/documents/${docId}/files/${cleanPath}?token=${token})`
+    }
   )
 }
 
