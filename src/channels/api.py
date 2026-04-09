@@ -274,6 +274,51 @@ async def get_document(doc_id: str):
     return result
 
 
+@app.put("/api/documents/{doc_id}/content", dependencies=[Depends(verify_token)])
+async def update_document_content(doc_id: str, body: dict):
+    """Update document markdown content."""
+    doc = db.get_document(doc_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    doc_dir = _safe_doc_path(doc["current_path"])
+    md_path = doc_dir / "document.md"
+    if not md_path.exists():
+        raise HTTPException(status_code=404, detail="Document file not found")
+    content = body.get("content", "")
+    if not isinstance(content, str):
+        raise HTTPException(status_code=400, detail="Content must be a string")
+    md_path.write_text(content, encoding="utf-8")
+    return {"status": "ok"}
+
+
+@app.get("/api/documents/{doc_id}/files/{file_path:path}")
+async def get_document_file(
+    doc_id: str,
+    file_path: str,
+    token: str = Query(default=""),
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+):
+    """Serve a file from a document's directory. Supports token as query param for img tags."""
+    # Verify auth: header OR query param
+    auth_token = credentials.credentials if credentials else token
+    if not auth_token:
+        raise HTTPException(status_code=401, detail="Missing token")
+    from src.auth.service import verify_jwt
+    if not (verify_jwt(auth_token) or (API_MASTER_TOKEN and hmac.compare_digest(auth_token, API_MASTER_TOKEN)) or db.validate_api_token(auth_token)):
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    doc = db.get_document(doc_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    doc_dir = _safe_doc_path(doc["current_path"])
+    target = (doc_dir / file_path).resolve()
+    if not target.is_relative_to(doc_dir.resolve()):
+        raise HTTPException(status_code=403, detail="Invalid path")
+    if not target.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+    return FileResponse(str(target))
+
+
 @app.get("/api/documents/{doc_id}/download", dependencies=[Depends(verify_token)])
 async def download_document(doc_id: str, format: str = Query(default="zip", pattern="^(zip|pdf)$")):
     """Download document as ZIP or PDF."""
