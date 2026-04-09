@@ -53,7 +53,7 @@ async def _run_review(review_type: str) -> None:
     try:
         from src.agents.review import run_review
         result = await run_review(review_type)
-        summary = result[:500] + "..." if len(result) > 500 else result
+        summary = result[:3500] + "..." if len(result) > 3500 else result
         await notify(f"{review_type.title()} Review\n\n{summary}")
     except Exception as e:
         logger.error("%s review failed: %s", review_type, e)
