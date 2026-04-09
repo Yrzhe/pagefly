@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { BookOpen, Search, Link2 } from 'lucide-react'
+import { useSearchParams } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import api from '@/api/client'
@@ -47,11 +48,13 @@ function parseSourceIds(raw: string): string[] {
 }
 
 export function WikiPage() {
+  const [searchParams] = useSearchParams()
   const [articles, setArticles] = useState<WikiArticle[]>([])
   const [selected, setSelected] = useState<WikiArticle | null>(null)
   const [content, setContent] = useState('')
   const [filter, setFilter] = useState('')
   const [typeFilter, setTypeFilter] = useState('all')
+  const [searchResults, setSearchResults] = useState<WikiArticle[] | null>(null)
   const [loading, setLoading] = useState(true)
 
   const fetchArticles = useCallback(async () => {
@@ -67,6 +70,30 @@ export function WikiPage() {
 
   useEffect(() => { fetchArticles() }, [fetchArticles])
 
+  // Debounced full-text search via API
+  useEffect(() => {
+    if (filter.length < 2) {
+      setSearchResults(null)
+      return
+    }
+    const timer = setTimeout(async () => {
+      try {
+        const { data } = await api.post('/api/search', { keyword: filter })
+        // Only keep wiki results
+        const wikiResults = (data.results || []).filter((r: { type: string }) => r.type === 'wiki')
+        const mapped = wikiResults.map((r: { id: string; title: string; snippet: string }) => {
+          const full = articles.find((a) => a.id === r.id)
+          if (full) return full
+          return { id: r.id, title: r.title, article_type: '', file_path: '', source_document_ids: '', created_at: '', updated_at: '', summary: r.snippet || '' } as WikiArticle
+        })
+        setSearchResults(mapped)
+      } catch {
+        setSearchResults(null)
+      }
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [filter, articles])
+
   const selectArticle = useCallback(async (article: WikiArticle) => {
     setSelected(article)
     try {
@@ -77,19 +104,21 @@ export function WikiPage() {
     }
   }, [])
 
-  // Auto-select first article
+  // Auto-select from URL param or first article
   useEffect(() => {
-    if (articles.length > 0 && !selected) {
-      selectArticle(articles[0])
+    if (articles.length === 0) return
+    const idParam = searchParams.get('id')
+    if (idParam) {
+      const target = articles.find((a) => a.id === idParam)
+      if (target) { selectArticle(target); return }
     }
-  }, [articles.length]) // eslint-disable-line react-hooks/exhaustive-deps
+    if (!selected) selectArticle(articles[0])
+  }, [articles.length, searchParams]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const filtered = articles.filter((a) => {
+  const baseList = searchResults !== null ? searchResults : articles
+  const filtered = baseList.filter((a) => {
     const matchType = typeFilter === 'all' || a.article_type === typeFilter
-    const matchSearch = !filter ||
-      a.title.toLowerCase().includes(filter.toLowerCase()) ||
-      a.article_type.toLowerCase().includes(filter.toLowerCase())
-    return matchType && matchSearch
+    return matchType
   })
 
   const sourceIds = selected ? parseSourceIds(selected.source_document_ids) : []

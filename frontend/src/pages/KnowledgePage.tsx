@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { ChevronRight, ChevronDown, FileText, Search, Upload } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
 import api from '@/api/client'
 import { cn } from '@/lib/utils'
 import { DocumentPreview } from '@/components/knowledge/DocumentPreview'
@@ -49,6 +50,7 @@ function buildTree(docs: Document[]): TreeNode[] {
 }
 
 export function KnowledgePage() {
+  const navigate = useNavigate()
   const [documents, setDocuments] = useState<Document[]>([])
   const [selectedDoc, setSelectedDoc] = useState<Document | null>(null)
   const [docContent, setDocContent] = useState('')
@@ -111,6 +113,11 @@ export function KnowledgePage() {
   }, [filter, documents])
 
   const selectDocument = useCallback(async (doc: Document) => {
+    // Wiki results: navigate to wiki page
+    if (doc.source_type === 'wiki') {
+      navigate(`/wiki?id=${doc.id}`)
+      return
+    }
     setSelectedDoc(doc)
     try {
       const { data } = await api.get(`/api/documents/${doc.id}`)
@@ -118,7 +125,7 @@ export function KnowledgePage() {
     } catch {
       setDocContent('Failed to load document content.')
     }
-  }, [])
+  }, [navigate])
 
   const toggleCategory = (cat: string) => {
     setExpandedCats((prev) => {
