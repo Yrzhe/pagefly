@@ -583,6 +583,72 @@ async def delete_prompt_api(name: str):
     return {"status": "ok"}
 
 
+# ── Workspace ──
+
+from src.shared.config import WORKSPACE_DIR, RAW_DIR
+
+@app.get("/api/workspace", dependencies=[Depends(verify_token)])
+async def list_workspace_files():
+    """List all files in workspace/."""
+    WORKSPACE_DIR.mkdir(parents=True, exist_ok=True)
+    files = []
+    for p in sorted(WORKSPACE_DIR.rglob("*")):
+        if p.is_file():
+            rel = p.relative_to(WORKSPACE_DIR)
+            files.append({
+                "path": str(rel),
+                "name": p.name,
+                "size": p.stat().st_size,
+                "modified": p.stat().st_mtime,
+            })
+    return {"files": files}
+
+
+@app.get("/api/workspace/{file_path:path}", dependencies=[Depends(verify_token)])
+async def read_workspace_file(file_path: str):
+    """Read a workspace file's content."""
+    target = (WORKSPACE_DIR / file_path).resolve()
+    if not target.is_relative_to(WORKSPACE_DIR.resolve()):
+        raise HTTPException(status_code=403, detail="Invalid path")
+    if not target.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+    if target.suffix in (".png", ".jpg", ".jpeg", ".gif", ".webp"):
+        return FileResponse(str(target))
+    return {"content": target.read_text(encoding="utf-8", errors="replace"), "path": file_path}
+
+
+@app.post("/api/workspace/move-to-raw/{file_path:path}", dependencies=[Depends(verify_token)])
+async def move_workspace_to_raw(file_path: str):
+    """Move a workspace file to raw/ for ingest pipeline processing."""
+    import shutil
+    source = (WORKSPACE_DIR / file_path).resolve()
+    if not source.is_relative_to(WORKSPACE_DIR.resolve()):
+        raise HTTPException(status_code=403, detail="Invalid path")
+    if not source.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+    dest = RAW_DIR / source.name
+    RAW_DIR.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(source), str(dest))
+    # Trigger ingest
+    from src.ingest.pipeline import ingest
+    from src.shared.types import IngestInput
+    loop = asyncio.get_running_loop()
+    doc_id = await loop.run_in_executor(None, ingest, IngestInput(type="file", file_path=str(dest), original_filename=source.name))
+    return {"status": "ok", "doc_id": doc_id, "message": f"Moved {file_path} to ingest pipeline"}
+
+
+@app.delete("/api/workspace/{file_path:path}", dependencies=[Depends(verify_token)])
+async def delete_workspace_file(file_path: str):
+    """Delete a workspace file."""
+    target = (WORKSPACE_DIR / file_path).resolve()
+    if not target.is_relative_to(WORKSPACE_DIR.resolve()):
+        raise HTTPException(status_code=403, detail="Invalid path")
+    if not target.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+    target.unlink()
+    return {"status": "ok"}
+
+
 # ── Tokens (master token required) ──
 
 @app.get("/api/tokens", dependencies=[Depends(verify_master_token)])
