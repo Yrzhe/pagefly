@@ -24,6 +24,17 @@ logger = get_logger("channels.api")
 
 app = FastAPI(title="PageFly API", version="0.1.0")
 
+from fastapi.middleware.cors import CORSMiddleware
+from src.shared.config import FRONTEND_ORIGIN
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[FRONTEND_ORIGIN] if FRONTEND_ORIGIN else [],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 
 def _safe_doc_path(raw_path: str) -> Path:
     """Validate and resolve a document path from DB. Raises HTTPException on traversal."""
@@ -45,7 +56,8 @@ async def health_check():
         conn.close()
         return {"status": "ok"}
     except Exception as e:
-        return JSONResponse(status_code=503, content={"status": "error", "detail": str(e)})
+        logger.error("Health check failed: %s", e)
+        return JSONResponse(status_code=503, content={"status": "error", "detail": "Service unavailable"})
 
 
 # ── Help (no auth required) ──

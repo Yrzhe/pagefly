@@ -209,7 +209,8 @@ async def _cmd_save(update: Update, context) -> None:
         doc_id = await loop.run_in_executor(None, ingest, input_data)
     except Exception as e:
         logger.error("Failed to save memo: %s", e)
-        await update.message.reply_text(f"Error saving memo: {e}")
+        logger.error("Failed to save memo: %s", e)
+        await update.message.reply_text("Failed to save memo. Please try again.")
         return
     finally:
         import shutil
@@ -387,9 +388,9 @@ async def _handle_message(update: Update, context) -> None:
         await typing_task
         logger.error("Agent error: %s", e)
         try:
-            await status_msg.edit_text(f"Error: {e}")
+            await status_msg.edit_text("Something went wrong. Please try again.")
         except Exception:
-            await update.message.reply_text(f"Error: {e}")
+            await update.message.reply_text("Something went wrong. Please try again.")
 
 
 async def _handle_document(update: Update, context) -> None:
@@ -417,7 +418,7 @@ async def _handle_document(update: Update, context) -> None:
             await update.message.reply_text(f"Failed to ingest: {filename}")
     except Exception as e:
         logger.error("Document ingest error: %s", e)
-        await update.message.reply_text(f"Error processing document: {e}")
+        await update.message.reply_text("Failed to process document. Please try again.")
     finally:
         _cleanup_tmp(tmp_path)
 
@@ -449,7 +450,7 @@ async def _handle_photo(update: Update, context) -> None:
             await update.message.reply_text("Failed to ingest photo")
     except Exception as e:
         logger.error("Photo ingest error: %s", e)
-        await update.message.reply_text(f"Error processing photo: {e}")
+        await update.message.reply_text("Failed to process photo. Please try again.")
     finally:
         _cleanup_tmp(tmp_path)
 
@@ -479,7 +480,7 @@ async def _handle_voice(update: Update, context) -> None:
             await update.message.reply_text("Failed to transcribe voice message")
     except Exception as e:
         logger.error("Voice ingest error: %s", e)
-        await update.message.reply_text(f"Error processing voice: {e}")
+        await update.message.reply_text("Failed to process voice. Please try again.")
     finally:
         _cleanup_tmp(tmp_path)
 
@@ -509,7 +510,7 @@ async def _handle_audio(update: Update, context) -> None:
             await update.message.reply_text(f"Failed to transcribe: {filename}")
     except Exception as e:
         logger.error("Audio ingest error: %s", e)
-        await update.message.reply_text(f"Error processing audio: {e}")
+        await update.message.reply_text("Failed to process audio. Please try again.")
     finally:
         _cleanup_tmp(tmp_path)
 
@@ -539,7 +540,7 @@ async def _handle_video(update: Update, context) -> None:
             await update.message.reply_text(f"Failed to process video: {filename}")
     except Exception as e:
         logger.error("Video ingest error: %s", e)
-        await update.message.reply_text(f"Error processing video: {e}")
+        await update.message.reply_text("Failed to process video. Please try again.")
     finally:
         _cleanup_tmp(tmp_path)
 

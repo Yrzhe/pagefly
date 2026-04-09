@@ -28,9 +28,10 @@ def fetch_simple(url: str) -> dict:
         with httpx.Client(follow_redirects=True, timeout=30) as client:
             resp = client.get(url, headers={"User-Agent": USER_AGENT})
             resp.raise_for_status()
-    except httpx.ConnectError:
-        # Fallback: skip SSL verification (some envs have cert issues)
-        with httpx.Client(follow_redirects=True, timeout=30, verify=False) as client:
+    except httpx.ConnectError as e:
+        logger.warning("SSL/connect error for %s: %s — retrying with certifi", url, e)
+        import certifi
+        with httpx.Client(follow_redirects=True, timeout=30, verify=certifi.where()) as client:
             resp = client.get(url, headers={"User-Agent": USER_AGENT})
             resp.raise_for_status()
 

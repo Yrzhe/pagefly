@@ -1029,12 +1029,13 @@ async def query_database(args):
 
     try:
         conn = get_connection()
+        conn.execute("PRAGMA query_only = ON")
         rows = conn.execute(sql).fetchmany(50)
         results = [dict(r) for r in rows]
         conn.close()
         return {"content": [{"type": "text", "text": json.dumps(results, ensure_ascii=False, indent=2)}]}
     except Exception as e:
-        return {"content": [{"type": "text", "text": f"Error: {e}"}]}
+        return {"content": [{"type": "text", "text": f"Query failed: {type(e).__name__}"}]}
 
 
 # ── Workspace tools ──

@@ -52,6 +52,9 @@ MISTRAL_BASE_URL: str = _env("MISTRAL_BASE_URL", _cfg["api_keys"]["mistral"].get
 TELEGRAM_BOT_TOKEN: str = _env("TELEGRAM_BOT_TOKEN", _cfg["telegram"]["bot_token"])
 TELEGRAM_CHAT_ID: str = _env("TELEGRAM_CHAT_ID", _cfg["telegram"]["chat_id"])
 
+# Frontend
+FRONTEND_ORIGIN: str = _env("FRONTEND_ORIGIN", _cfg.get("frontend", {}).get("origin", ""))
+
 # Database
 DATABASE_URL: str = _env("DATABASE_URL", _cfg["database"]["url"])
 
