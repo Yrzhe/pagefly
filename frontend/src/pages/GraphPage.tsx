@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { GitFork, Search, ZoomIn, ZoomOut, Maximize2, X, Expand, Pencil, Save } from 'lucide-react'
+import { GitFork, Search, Maximize2, X, Expand, Pencil, Save } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import cytoscape from 'cytoscape'
+import ForceGraph2D from 'react-force-graph-2d'
 import api from '@/api/client'
 
 interface GraphNode {
@@ -12,12 +12,22 @@ interface GraphNode {
   category?: string
   subcategory?: string
   article_type?: string
+  // d3 force fields
+  x?: number
+  y?: number
+  fx?: number | null
+  fy?: number | null
 }
 
 interface GraphEdge {
   source: string
   target: string
   relation: string
+}
+
+interface GraphData {
+  nodes: GraphNode[]
+  links: GraphEdge[]
 }
 
 function rewriteImageUrls(markdown: string, node: GraphNode): string {
@@ -50,8 +60,9 @@ function getNodeColor(node: GraphNode): string {
 }
 
 export function GraphPage() {
+  const graphRef = useRef<any>(null)
   const containerRef = useRef<HTMLDivElement>(null)
-  const cyRef = useRef<cytoscape.Core | null>(null)
+  const [graphData, setGraphData] = useState<GraphData>({ nodes: [], links: [] })
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null)
   const [panelOpen, setPanelOpen] = useState(false)
   const [panelContent, setPanelContent] = useState('')
@@ -59,232 +70,64 @@ export function GraphPage() {
   const [panelMode, setPanelMode] = useState<'preview' | 'edit'>('preview')
   const [panelSaving, setPanelSaving] = useState(false)
   const [search, setSearch] = useState('')
-  const [stats, setStats] = useState({ nodes: 0, edges: 0 })
+  const [highlightNodes, setHighlightNodes] = useState<Set<string>>(new Set())
+  const [dimensions, setDimensions] = useState({ width: 800, height: 600 })
 
-  const initGraph = useCallback(async () => {
-    if (!containerRef.current) return
-
-    try {
-      const { data } = await api.get('/api/graph')
-      const nodes: GraphNode[] = data.nodes || []
-      const edges: GraphEdge[] = data.edges || []
-
-      setStats({ nodes: nodes.length, edges: edges.length })
-
-      // Build cytoscape elements
-      const nodeSet = new Set(nodes.map((n) => n.id))
-      const cyNodes = nodes.map((n) => ({
-        data: {
-          id: n.id,
-          label: n.label.length > 20 ? n.label.slice(0, 20) + '...' : n.label,
-          fullLabel: n.label,
-          type: n.type,
-          category: n.category || '',
-          subcategory: n.subcategory || '',
-          article_type: n.article_type || '',
-          color: getNodeColor(n),
-          size: n.type === 'wiki' ? 40 : 30,
-        },
-      }))
-
-      const cyEdges = edges
-        .filter((e) => nodeSet.has(e.source) && nodeSet.has(e.target))
-        .map((e, i) => ({
-          data: {
-            id: `e${i}`,
-            source: e.source,
-            target: e.target,
-            relation: e.relation,
-          },
-        }))
-
-      const cy = cytoscape({
-        container: containerRef.current,
-        elements: [...cyNodes, ...cyEdges],
-        style: [
-          {
-            selector: 'node',
-            style: {
-              'background-color': 'data(color)',
-              label: 'data(label)',
-              'font-size': '10px',
-              'font-family': 'system-ui, sans-serif',
-              color: '#1C1917',
-              'text-valign': 'bottom',
-              'text-margin-y': 6,
-              width: 'data(size)',
-              height: 'data(size)',
-              'border-width': 2,
-              'border-color': '#E7E5E4',
-            },
-          },
-          {
-            selector: 'node[type="wiki"]',
-            style: {
-              shape: 'diamond',
-            },
-          },
-          {
-            selector: 'node:selected',
-            style: {
-              'border-width': 3,
-              'border-color': '#1C1917',
-              'background-opacity': 1,
-            },
-          },
-          {
-            selector: 'node.highlighted',
-            style: {
-              'border-width': 3,
-              'border-color': '#F59E0B',
-              'background-opacity': 1,
-            },
-          },
-          {
-            selector: 'node.dimmed',
-            style: {
-              opacity: 0.2,
-            },
-          },
-          {
-            selector: 'edge',
-            style: {
-              width: 1.5,
-              'line-color': '#E7E5E4',
-              'target-arrow-color': '#A8A29E',
-              'target-arrow-shape': 'triangle',
-              'curve-style': 'bezier',
-              'arrow-scale': 0.8,
-            },
-          },
-          {
-            selector: 'edge.highlighted',
-            style: {
-              'line-color': '#F59E0B',
-              'target-arrow-color': '#F59E0B',
-              width: 2.5,
-            },
-          },
-          {
-            selector: 'edge.dimmed',
-            style: {
-              opacity: 0.1,
-            },
-          },
-        ],
-        // Use cose layout for circular shape, then allow manual dragging
-        layout: {
-          name: 'cose',
-          animate: true,
-          animationDuration: 800,
-          fit: true,
-          padding: 60,
-          nodeDimensionsIncludeLabels: true,
-          nodeRepulsion: () => 8000,
-          idealEdgeLength: () => 120,
-          edgeElasticity: () => 100,
-          gravity: 1,
-          numIter: 500,
-          randomize: false,
-        } as cytoscape.LayoutOptions,
-        // Interaction
-        userZoomingEnabled: true,
-        userPanningEnabled: true,
-        boxSelectionEnabled: false,
-        minZoom: 0.1,
-        maxZoom: 5,
-        wheelSensitivity: 0.3,
-      })
-
-      // ── Drag physics: spring-like pull on connected nodes ──
-      let dragLayout: cytoscape.Layouts | null = null
-
-      cy.on('grab', 'node', () => {
-        // Stop any running drag layout
-        if (dragLayout) { dragLayout.stop(); dragLayout = null }
-      })
-
-      cy.on('free', 'node', (e) => {
-        const node = e.target
-        // Re-layout neighborhood around the dragged node
-        const neighborhood = node.neighborhood().nodes().union(node)
-        if (neighborhood.length <= 1) return
-
-        dragLayout = neighborhood.layout({
-          name: 'cose',
-          animate: true,
-          animationDuration: 300,
-          fit: false,
-          padding: 0,
-          nodeDimensionsIncludeLabels: true,
-          nodeRepulsion: () => 5000,
-          idealEdgeLength: () => 140,
-          edgeElasticity: () => 150,
-          gravity: 0.5,
-          numIter: 100,
-          randomize: false,
-        } as cytoscape.LayoutOptions)
-        dragLayout!.run()
-      })
-
-      cy.on('tap', 'node', (e) => {
-        const node = e.target
-        const nodeData: GraphNode = {
-          id: node.data('id'),
-          label: node.data('fullLabel'),
-          type: node.data('type'),
-          category: node.data('category'),
-          subcategory: node.data('subcategory'),
-          article_type: node.data('article_type'),
-        }
-        setSelectedNode(nodeData)
-
-        // Highlight connected nodes
-        cy.elements().removeClass('highlighted dimmed')
-        const connected = node.neighborhood()
-        cy.elements().addClass('dimmed')
-        node.removeClass('dimmed').addClass('highlighted')
-        connected.removeClass('dimmed').addClass('highlighted')
-      })
-
-      cy.on('tap', (e) => {
-        if (e.target === cy) {
-          setSelectedNode(null)
-          cy.elements().removeClass('highlighted dimmed')
-        }
-      })
-
-      cyRef.current = cy
-    } catch {
-      // silent
+  // Track container size
+  useEffect(() => {
+    const updateSize = () => {
+      if (containerRef.current) {
+        setDimensions({
+          width: containerRef.current.clientWidth,
+          height: containerRef.current.clientHeight,
+        })
+      }
     }
+    updateSize()
+    window.addEventListener('resize', updateSize)
+    return () => window.removeEventListener('resize', updateSize)
   }, [])
 
+  // Fetch graph data
   useEffect(() => {
-    initGraph()
-    return () => { cyRef.current?.destroy() }
-  }, [initGraph])
+    const fetchData = async () => {
+      try {
+        const { data } = await api.get('/api/graph')
+        const nodes: GraphNode[] = data.nodes || []
+        const edges: GraphEdge[] = data.edges || []
+        const nodeSet = new Set(nodes.map(n => n.id))
+        const validEdges = edges.filter(e => nodeSet.has(e.source) && nodeSet.has(e.target))
+        setGraphData({ nodes, links: validEdges })
+      } catch { /* silent */ }
+    }
+    fetchData()
+  }, [])
 
   // Search highlight
   useEffect(() => {
-    const cy = cyRef.current
-    if (!cy) return
-    cy.elements().removeClass('highlighted dimmed')
-    if (!search) return
-    const lower = search.toLowerCase()
-    const matches = cy.nodes().filter((n) =>
-      n.data('fullLabel').toLowerCase().includes(lower) ||
-      n.data('category').toLowerCase().includes(lower) ||
-      n.data('article_type').toLowerCase().includes(lower)
-    )
-    if (matches.length > 0) {
-      cy.elements().addClass('dimmed')
-      matches.forEach((n) => {
-        n.removeClass('dimmed').addClass('highlighted')
-        n.neighborhood().removeClass('dimmed').addClass('highlighted')
-      })
+    if (!search) {
+      setHighlightNodes(new Set())
+      return
     }
-  }, [search])
+    const lower = search.toLowerCase()
+    const matches = new Set(
+      graphData.nodes
+        .filter(n =>
+          n.label.toLowerCase().includes(lower) ||
+          (n.category || '').toLowerCase().includes(lower) ||
+          (n.article_type || '').toLowerCase().includes(lower)
+        )
+        .map(n => n.id)
+    )
+    setHighlightNodes(matches)
+  }, [search, graphData.nodes])
+
+  const handleNodeClick = useCallback((node: GraphNode) => {
+    setSelectedNode(node)
+    // Center on clicked node
+    graphRef.current?.centerAt(node.x, node.y, 500)
+    graphRef.current?.zoom(2, 500)
+  }, [])
 
   const openPanel = useCallback(async (node: GraphNode) => {
     setPanelOpen(true)
@@ -321,24 +164,57 @@ export function GraphPage() {
   const closePanel = () => {
     setPanelOpen(false)
     setSelectedNode(null)
-    cyRef.current?.elements().removeClass('highlighted dimmed')
+    setHighlightNodes(new Set())
   }
 
-  const handleZoomIn = () => {
-    const cy = cyRef.current
-    if (!cy) return
-    cy.animate({ zoom: { level: cy.zoom() * 1.3, position: cy.extent() ? { x: (cy.extent().x1 + cy.extent().x2) / 2, y: (cy.extent().y1 + cy.extent().y2) / 2 } : { x: 0, y: 0 } }, duration: 200 })
-  }
-  const handleZoomOut = () => {
-    const cy = cyRef.current
-    if (!cy) return
-    cy.animate({ zoom: { level: cy.zoom() / 1.3, position: cy.extent() ? { x: (cy.extent().x1 + cy.extent().x2) / 2, y: (cy.extent().y1 + cy.extent().y2) / 2 } : { x: 0, y: 0 } }, duration: 200 })
-  }
   const handleFit = () => {
-    const cy = cyRef.current
-    if (!cy) return
-    cy.animate({ fit: { eles: cy.elements(), padding: 50 }, duration: 400 })
+    graphRef.current?.zoomToFit(400, 50)
   }
+
+  // Custom node rendering
+  const paintNode = useCallback((node: GraphNode, ctx: CanvasRenderingContext2D) => {
+    const size = node.type === 'wiki' ? 6 : 5
+    const color = getNodeColor(node)
+    const isHighlighted = highlightNodes.size === 0 || highlightNodes.has(node.id)
+    const isSelected = selectedNode?.id === node.id
+
+    ctx.globalAlpha = isHighlighted ? 1 : 0.15
+
+    // Draw node
+    if (node.type === 'wiki') {
+      // Diamond shape for wiki
+      ctx.save()
+      ctx.translate(node.x!, node.y!)
+      ctx.rotate(Math.PI / 4)
+      ctx.fillStyle = color
+      ctx.fillRect(-size / 1.4, -size / 1.4, size * 1.4, size * 1.4)
+      ctx.restore()
+    } else {
+      // Circle for documents
+      ctx.beginPath()
+      ctx.arc(node.x!, node.y!, size, 0, 2 * Math.PI)
+      ctx.fillStyle = color
+      ctx.fill()
+    }
+
+    // Selected border
+    if (isSelected) {
+      ctx.beginPath()
+      ctx.arc(node.x!, node.y!, size + 2, 0, 2 * Math.PI)
+      ctx.strokeStyle = '#1C1917'
+      ctx.lineWidth = 1.5
+      ctx.stroke()
+    }
+
+    // Label
+    const label = node.label.length > 20 ? node.label.slice(0, 20) + '...' : node.label
+    ctx.font = '3px system-ui, sans-serif'
+    ctx.textAlign = 'center'
+    ctx.fillStyle = '#1C1917'
+    ctx.fillText(label, node.x!, node.y! + size + 5)
+
+    ctx.globalAlpha = 1
+  }, [highlightNodes, selectedNode])
 
   return (
     <div className="flex flex-col h-screen">
@@ -346,7 +222,7 @@ export function GraphPage() {
         <div className="flex items-center gap-3">
           <GitFork size={16} className="text-accent-primary" />
           <h1 className="font-heading text-[15px] font-bold text-text-primary">Knowledge Graph</h1>
-          <span className="text-xs text-text-tertiary">{stats.nodes} nodes · {stats.edges} edges</span>
+          <span className="text-xs text-text-tertiary">{graphData.nodes.length} nodes · {graphData.links.length} edges</span>
         </div>
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2 px-3 py-2 border border-border rounded-[6px] w-56">
@@ -359,17 +235,42 @@ export function GraphPage() {
               className="flex-1 bg-transparent text-sm text-text-primary placeholder:text-text-tertiary outline-none"
             />
           </div>
-          <div className="flex gap-1">
-            <button onClick={handleZoomIn} className="p-2 border border-border rounded-[6px] hover:bg-bg-secondary transition-colors"><ZoomIn size={14} className="text-text-secondary" /></button>
-            <button onClick={handleZoomOut} className="p-2 border border-border rounded-[6px] hover:bg-bg-secondary transition-colors"><ZoomOut size={14} className="text-text-secondary" /></button>
-            <button onClick={handleFit} title="Center graph" className="p-2 border border-border rounded-[6px] hover:bg-bg-secondary transition-colors"><Maximize2 size={14} className="text-text-secondary" /></button>
-          </div>
+          <button onClick={handleFit} title="Center graph" className="p-2 border border-border rounded-[6px] hover:bg-bg-secondary transition-colors">
+            <Maximize2 size={14} className="text-text-secondary" />
+          </button>
         </div>
       </header>
 
       <div className="flex flex-1 overflow-hidden relative">
-        {/* Graph canvas */}
-        <div ref={containerRef} className="flex-1 bg-bg-primary" />
+        <div ref={containerRef} className="flex-1 bg-bg-primary">
+          {graphData.nodes.length > 0 && (
+            <ForceGraph2D
+              ref={graphRef}
+              graphData={graphData as any}
+              width={dimensions.width}
+              height={dimensions.height}
+              nodeCanvasObject={paintNode}
+              nodePointerAreaPaint={(node: GraphNode, color: string, ctx: CanvasRenderingContext2D) => {
+                const size = 8
+                ctx.fillStyle = color
+                ctx.beginPath()
+                ctx.arc(node.x!, node.y!, size, 0, 2 * Math.PI)
+                ctx.fill()
+              }}
+              onNodeClick={handleNodeClick}
+              linkColor={() => '#D6D3D1'}
+              linkWidth={1}
+              linkDirectionalArrowLength={4}
+              linkDirectionalArrowRelPos={1}
+              d3AlphaDecay={0.02}
+              d3VelocityDecay={0.3}
+              cooldownTicks={200}
+              enableNodeDrag={true}
+              enableZoomInteraction={true}
+              enablePanInteraction={true}
+            />
+          )}
+        </div>
 
         {/* Legend */}
         <div className="absolute bottom-4 left-4 bg-bg-secondary/90 backdrop-blur-sm border border-border rounded-[8px] px-3 py-2 flex gap-4 text-[10px]">
@@ -389,7 +290,7 @@ export function GraphPage() {
                 </span>
                 <h3 className="text-xs font-semibold text-text-primary mt-0.5 leading-snug">{selectedNode.label}</h3>
               </div>
-              <button onClick={() => { setSelectedNode(null); cyRef.current?.elements().removeClass('highlighted dimmed') }} className="p-1 hover:bg-bg-tertiary rounded">
+              <button onClick={() => { setSelectedNode(null); setHighlightNodes(new Set()) }} className="p-1 hover:bg-bg-tertiary rounded">
                 <X size={11} className="text-text-tertiary" />
               </button>
             </div>
