@@ -3,7 +3,11 @@ import { GitFork, Search, ZoomIn, ZoomOut, Maximize2, X, Expand, Pencil, Save } 
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import cytoscape from 'cytoscape'
+// @ts-expect-error no types for cytoscape-fcose
+import fcose from 'cytoscape-fcose'
 import api from '@/api/client'
+
+cytoscape.use(fcose)
 
 interface GraphNode {
   id: string
@@ -173,12 +177,18 @@ export function GraphPage() {
           },
         ],
         layout: {
-          name: 'cose',
-          animate: false,
+          name: 'fcose',
+          animate: true,
+          animationDuration: 800,
+          animationEasing: 'ease-out',
+          quality: 'proof',
           nodeDimensionsIncludeLabels: true,
-          idealEdgeLength: () => 120,
-          nodeRepulsion: () => 8000,
-          padding: 40,
+          idealEdgeLength: 140,
+          nodeRepulsion: 6000,
+          edgeElasticity: 0.45,
+          gravity: 0.3,
+          gravityRange: 1.5,
+          padding: 50,
         } as cytoscape.LayoutOptions,
       })
 
@@ -207,6 +217,33 @@ export function GraphPage() {
           setSelectedNode(null)
           cy.elements().removeClass('highlighted dimmed')
         }
+      })
+
+      // Dynamic drag: re-run layout on nearby nodes when dragging
+      let dragLayout: cytoscape.Layouts | undefined
+      cy.on('drag', 'node', (e) => {
+        const node = e.target
+        // Lock the dragged node so layout doesn't move it
+        node.lock()
+      })
+      cy.on('free', 'node', (e) => {
+        const node = e.target
+        node.unlock()
+        // Re-layout connected nodes smoothly
+        const neighborhood = node.neighborhood().nodes().union(node)
+        dragLayout?.stop()
+        dragLayout = neighborhood.layout({
+          name: 'fcose',
+          animate: true,
+          animationDuration: 300,
+          animationEasing: 'ease-out',
+          quality: 'default',
+          idealEdgeLength: 140,
+          nodeRepulsion: 5000,
+          fixedNodeConstraint: [{ nodeId: node.id(), position: node.position() }],
+          padding: 20,
+        } as cytoscape.LayoutOptions)
+        dragLayout!.run()
       })
 
       cyRef.current = cy
