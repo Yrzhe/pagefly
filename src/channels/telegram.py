@@ -169,7 +169,7 @@ async def _cmd_start(update: Update, context) -> None:
 
 
 async def _cmd_save(update: Update, context) -> None:
-    """Handle /save command — save current conversation as a knowledge doc."""
+    """Handle /save command — save current conversation via ingest pipeline."""
     chat_id = update.effective_chat.id
     if TELEGRAM_CHAT_ID and str(chat_id) != str(TELEGRAM_CHAT_ID):
         return
@@ -179,74 +179,48 @@ async def _cmd_save(update: Update, context) -> None:
         await update.message.reply_text("No conversation to save.")
         return
 
-    from src.ingest.metadata import generate_id, now_iso, write_metadata
-    from src.storage import db
-    from src.storage.files import create_file
+    import tempfile
+    from src.ingest.pipeline import ingest
+    from src.shared.types import IngestInput
 
     now = datetime.now(timezone.utc).astimezone()
     timestamp_str = now.strftime("%Y-%m-%d %H:%M")
 
-    # Build content
     lines = []
     for msg in session.messages:
         role = "User" if msg["role"] == "user" else "PageFly"
         lines.append(f"**{role}**: {msg['content']}")
 
-    # Extract title from first user message
     first_user = next((m["content"][:60] for m in session.messages if m["role"] == "user"), "Conversation")
     title = f"Memo: {first_user}"
-
     content = f"# {title}\n\n> Saved at {timestamp_str}\n\n" + "\n\n".join(lines)
 
-    doc_id = generate_id()
-    ts = now_iso()
-    folder_name = f"memo_{now.strftime('%Y%m%d_%H%M')}_{doc_id[:8]}"
-    doc_dir = KNOWLEDGE_DIR / "notes" / folder_name
+    tmp_dir = tempfile.mkdtemp(prefix="pagefly_save_")
+    tmp_path = Path(tmp_dir) / f"memo_{now.strftime('%Y%m%d_%H%M')}.md"
+    tmp_path.write_text(content, encoding="utf-8")
 
     try:
-        create_file(doc_dir / "document.md", content)
-        metadata = {
-            "id": doc_id,
-            "title": title,
-            "description": f"Conversation memo saved at {timestamp_str}",
-            "source_type": "conversation",
-            "original_filename": "",
-            "ingested_at": ts,
-            "status": "classified",
-            "location": f"knowledge/notes/{folder_name}",
-            "tags": ["memo", "conversation"],
-            "category": "notes",
-            "subcategory": "",
-            "references": [],
-        }
-        write_metadata(doc_dir, metadata)
-
-        with db.transaction() as conn:
-            conn.execute(
-                """INSERT INTO documents (id, title, source_type, original_filename, current_path, ingested_at)
-                VALUES (?, ?, ?, ?, ?, ?)""",
-                (doc_id, title, "conversation", "", str(doc_dir), ts),
-            )
-            conn.execute(
-                "UPDATE documents SET status=?, category=? WHERE id=?",
-                ("classified", "notes", doc_id),
-            )
-            conn.execute(
-                """INSERT INTO operations_log (document_id, operation, from_path, to_path, details_json, created_at)
-                VALUES (?, ?, ?, ?, ?, ?)""",
-                (doc_id, "ingest", "", str(doc_dir), "{}", ts),
-            )
+        input_data = IngestInput(
+            type="file",
+            file_path=str(tmp_path),
+            original_filename=tmp_path.name,
+        )
+        doc_id = ingest(input_data)
     except Exception as e:
-        import shutil
-        if doc_dir.exists():
-            shutil.rmtree(doc_dir, ignore_errors=True)
         logger.error("Failed to save memo: %s", e)
         await update.message.reply_text(f"Error saving memo: {e}")
         return
+    finally:
+        tmp_path.unlink(missing_ok=True)
+        Path(tmp_dir).rmdir()
 
-    await update.message.reply_text(
-        f"Saved {len(session.messages)} messages as memo\nID: {doc_id[:8]}"
-    )
+    if doc_id:
+        await update.message.reply_text(
+            f"Saved {len(session.messages)} messages as memo\nID: {doc_id[:8]}"
+        )
+        logger.info("Conversation saved via pipeline: %s (%d messages)", title[:40], len(session.messages))
+    else:
+        await update.message.reply_text("Failed to save memo")
     logger.info("Conversation saved as memo: %s (%d messages)", title[:40], len(session.messages))
 
 
@@ -603,10 +577,11 @@ def _cleanup_tmp(tmp_path: Path) -> None:
 
 
 async def _save_daily_chat(context) -> None:
-    """Scheduled job: archive today's chat as a knowledge document."""
-    from src.ingest.metadata import generate_id, now_iso, write_metadata
+    """Scheduled job: archive today's chat via ingest pipeline."""
+    import tempfile
+    from src.ingest.pipeline import ingest
+    from src.shared.types import IngestInput
     from src.storage import db
-    from src.storage.files import create_file
 
     now = datetime.now(timezone.utc).astimezone()
     today = now.strftime("%Y-%m-%d")
@@ -616,7 +591,7 @@ async def _save_daily_chat(context) -> None:
         if not session.messages:
             continue
 
-        # Only archive today's messages (avoid re-archiving old ones)
+        # Only archive today's messages
         today_msgs = []
         for m in session.messages:
             ts_str = m.get("ts", "")
@@ -639,58 +614,32 @@ async def _save_daily_chat(context) -> None:
 
         content = f"# Chat Log — {today}\n\n" + "\n\n".join(lines)
 
-        doc_id = generate_id()
-        timestamp = now_iso()
-        folder_name = f"chat_{today}_{doc_id[:8]}"
-        doc_dir = KNOWLEDGE_DIR / "conversations" / folder_name
+        # Write to temp file and ingest through pipeline
+        # This ensures: raw/ → classifier → knowledge/ → compiler
+        tmp_dir = tempfile.mkdtemp(prefix="pagefly_chat_")
+        tmp_path = Path(tmp_dir) / f"chat_{today}.md"
+        tmp_path.write_text(content, encoding="utf-8")
 
         try:
-            create_file(doc_dir / "document.md", content)
-            metadata = {
-                "id": doc_id,
-                "title": f"Chat Log {today}",
-                "description": f"Daily conversation log from {today}",
-                "source_type": "conversation",
-                "original_filename": "",
-                "ingested_at": timestamp,
-                "status": "classified",
-                "location": f"knowledge/conversations/{folder_name}",
-                "tags": ["chat", "daily"],
-                "category": "conversations",
-                "subcategory": "",
-                "references": [],
-            }
-            write_metadata(doc_dir, metadata)
-
-            with db.transaction() as conn:
-                conn.execute(
-                    """INSERT INTO documents (id, title, source_type, original_filename, current_path, ingested_at)
-                    VALUES (?, ?, ?, ?, ?, ?)""",
-                    (doc_id, f"Chat Log {today}", "conversation", "", str(doc_dir), timestamp),
-                )
-                conn.execute(
-                    "UPDATE documents SET status=?, category=? WHERE id=?",
-                    ("classified", "conversations", doc_id),
-                )
-                conn.execute(
-                    """INSERT INTO operations_log (document_id, operation, from_path, to_path, details_json, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?)""",
-                    (doc_id, "ingest", "", str(doc_dir), "{}", timestamp),
-                )
+            input_data = IngestInput(
+                type="file",
+                file_path=str(tmp_path),
+                original_filename=f"chat_{today}.md",
+            )
+            doc_id = ingest(input_data)
+            if doc_id:
+                logger.info("Daily chat archived via pipeline: %s (%d messages)", today, len(today_msgs))
+            else:
+                logger.error("Failed to ingest daily chat for %s", chat_id)
         except Exception as e:
-            import shutil
-            if doc_dir.exists():
-                shutil.rmtree(doc_dir, ignore_errors=True)
             logger.error("Failed to save daily chat for %s: %s", chat_id, e)
-            continue
+        finally:
+            tmp_path.unlink(missing_ok=True)
+            Path(tmp_dir).rmdir()
 
-        logger.info("Saved daily chat log: %s (%d messages, %d today)", today, len(session.messages), len(today_msgs))
-
-        # Trim to last 50 messages (keep context for tomorrow) instead of clearing
+        # Trim to last 50 messages (keep context for tomorrow)
         session.messages = session.messages[-50:]
-        # Refresh timestamp so session doesn't expire before next use
         _sessions[chat_id] = (session, datetime.now(timezone.utc).timestamp())
-        # Persist trimmed session to DB
         db.save_session(chat_id, session.messages)
 
 
