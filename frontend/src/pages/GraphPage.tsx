@@ -20,6 +20,19 @@ interface GraphEdge {
   relation: string
 }
 
+function rewriteImageUrls(markdown: string, node: GraphNode): string {
+  const token = localStorage.getItem('pagefly_token') || ''
+  const apiBase = import.meta.env.VITE_API_URL || ''
+  return markdown.replace(
+    /!\[([^\]]*)\]\((?!https?:\/\/)([^)]+)\)/g,
+    (_, alt, path) => {
+      const cleanPath = path.replace(/^\.\//, '')
+      const endpoint = node.type === 'wiki' ? 'wiki' : 'documents'
+      return `![${alt}](${apiBase}/api/${endpoint}/${node.id}/files/${cleanPath}?token=${token})`
+    }
+  )
+}
+
 const NODE_COLORS: Record<string, string> = {
   document: '#F59E0B',
   concept: '#2563EB',
@@ -381,7 +394,9 @@ export function GraphPage() {
                 />
               ) : (
                 <article className="px-5 py-4 prose-pagefly">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{panelContent}</ReactMarkdown>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    {rewriteImageUrls(panelContent, selectedNode)}
+                  </ReactMarkdown>
                 </article>
               )}
             </div>
