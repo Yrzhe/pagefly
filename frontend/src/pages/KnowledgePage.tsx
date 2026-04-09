@@ -261,7 +261,11 @@ export function KnowledgePage() {
         <DocumentPreview doc={selectedDoc} content={docContent} />
 
         {/* Metadata Panel */}
-        <MetadataPanel doc={selectedDoc} onUpdate={fetchDocuments} />
+        <MetadataPanel
+          doc={selectedDoc}
+          onUpdate={fetchDocuments}
+          onDelete={() => { setSelectedDoc(null); setDocContent(''); fetchDocuments() }}
+        />
       </div>
     </div>
   )
