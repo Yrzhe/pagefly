@@ -39,7 +39,6 @@ knowledge/{category}/{subcategory?}/{title}_{id[:8]}/
 | people | People | — |
 | projects | Projects | — |
 | ideas | Ideas | — |
-| notes | Notes | — |
 | memo | Memo | (dynamic, based on content topic: ai, tech, etc.) |
 | misc | Uncategorized | — |
 
