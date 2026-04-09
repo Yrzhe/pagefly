@@ -137,12 +137,17 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
 
 
 def verify_master_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    """Verify master token only — for token management endpoints."""
+    """Verify master token or valid JWT — for token management endpoints."""
     if not credentials:
         raise HTTPException(status_code=401, detail="Missing Authorization header")
-    if not API_MASTER_TOKEN or not hmac.compare_digest(credentials.credentials, API_MASTER_TOKEN):
-        raise HTTPException(status_code=403, detail="Master token required")
-    return credentials
+    # Accept master token
+    if API_MASTER_TOKEN and hmac.compare_digest(credentials.credentials, API_MASTER_TOKEN):
+        return credentials
+    # Accept valid JWT (logged-in admin)
+    from src.auth.service import verify_jwt
+    if verify_jwt(credentials.credentials):
+        return credentials
+    raise HTTPException(status_code=403, detail="Master token or valid login required")
 
 
 # ── Ingest ──
