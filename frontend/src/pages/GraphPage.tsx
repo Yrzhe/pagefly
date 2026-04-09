@@ -2,250 +2,281 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { GitFork, Search, Maximize2, X, Expand, Pencil, Save } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import cytoscape from 'cytoscape'
-// @ts-expect-error no types
-import cola from 'cytoscape-cola'
+import { forceSimulation, forceLink, forceManyBody, forceCenter, forceCollide, type SimulationNodeDatum, type SimulationLinkDatum } from 'd3-force'
+import { select } from 'd3-selection'
+import { zoom as d3Zoom, zoomIdentity } from 'd3-zoom'
+import { drag as d3Drag } from 'd3-drag'
 import api from '@/api/client'
 
-cytoscape.use(cola)
-
-interface GraphNode {
+interface GNode extends SimulationNodeDatum {
   id: string
   label: string
   type: 'document' | 'wiki'
-  category?: string
-  subcategory?: string
-  article_type?: string
+  category: string
+  subcategory: string
+  article_type: string
 }
 
-interface GraphEdge {
-  source: string
-  target: string
-  relation: string
+interface GLink extends SimulationLinkDatum<GNode> {
+  source: string | GNode
+  target: string | GNode
 }
 
-const NODE_COLORS: Record<string, string> = {
-  document: '#F59E0B',
-  concept: '#2563EB',
-  summary: '#D97706',
-  connection: '#7C3AED',
-  insight: '#16A34A',
-  qa: '#EA580C',
-  lint: '#DC2626',
-  review: '#78716C',
+const COLORS: Record<string, string> = {
+  document: '#F59E0B', concept: '#2563EB', summary: '#D97706',
+  connection: '#7C3AED', insight: '#16A34A', qa: '#EA580C',
+  lint: '#DC2626', review: '#78716C',
 }
 
-function rewriteImageUrls(markdown: string, node: GraphNode): string {
+function nodeColor(n: GNode): string {
+  return n.type === 'wiki' ? (COLORS[n.article_type] || '#2563EB') : COLORS.document
+}
+
+function rewriteImageUrls(md: string, node: GNode): string {
   const token = localStorage.getItem('pagefly_token') || ''
-  const apiBase = import.meta.env.VITE_API_URL || ''
-  return markdown.replace(
-    /!\[([^\]]*)\]\((?!https?:\/\/)([^)]+)\)/g,
-    (_, alt, path) => {
-      const cleanPath = path.replace(/^\.\//, '')
-      const endpoint = node.type === 'wiki' ? 'wiki' : 'documents'
-      return `![${alt}](${apiBase}/api/${endpoint}/${node.id}/files/${cleanPath}?token=${token})`
-    }
-  )
-}
-
-function getNodeColor(node: { type: string; article_type?: string }): string {
-  if (node.type === 'wiki') return NODE_COLORS[node.article_type || ''] || '#2563EB'
-  return NODE_COLORS.document
+  const base = import.meta.env.VITE_API_URL || ''
+  return md.replace(/!\[([^\]]*)\]\((?!https?:\/\/)([^)]+)\)/g, (_, alt, path) => {
+    const ep = node.type === 'wiki' ? 'wiki' : 'documents'
+    return `![${alt}](${base}/api/${ep}/${node.id}/files/${path.replace(/^\.\//, '')}?token=${token})`
+  })
 }
 
 export function GraphPage() {
-  const containerRef = useRef<HTMLDivElement>(null)
-  const cyRef = useRef<cytoscape.Core | null>(null)
-  const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null)
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const simRef = useRef<ReturnType<typeof forceSimulation<GNode>> | null>(null)
+  const nodesRef = useRef<GNode[]>([])
+  const linksRef = useRef<GLink[]>([])
+  const transformRef = useRef(zoomIdentity)
+
+  const [selectedNode, setSelectedNode] = useState<GNode | null>(null)
   const [panelOpen, setPanelOpen] = useState(false)
   const [panelContent, setPanelContent] = useState('')
   const [editContent, setEditContent] = useState('')
   const [panelMode, setPanelMode] = useState<'preview' | 'edit'>('preview')
   const [panelSaving, setPanelSaving] = useState(false)
   const [search, setSearch] = useState('')
+  const [highlightIds, setHighlightIds] = useState<Set<string>>(new Set())
   const [stats, setStats] = useState({ nodes: 0, edges: 0 })
 
-  const initGraph = useCallback(async () => {
-    if (!containerRef.current) return
-    try {
-      const { data } = await api.get('/api/graph')
-      const nodes: GraphNode[] = data.nodes || []
-      const edges: GraphEdge[] = data.edges || []
-      setStats({ nodes: nodes.length, edges: edges.length })
+  // Draw
+  const draw = useCallback(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+    const t = transformRef.current
+    const w = canvas.width
+    const h = canvas.height
 
-      const nodeSet = new Set(nodes.map((n) => n.id))
-      const cyNodes = nodes.map((n) => ({
-        data: {
-          id: n.id,
-          label: n.label.length > 18 ? n.label.slice(0, 18) + '…' : n.label,
-          fullLabel: n.label,
-          type: n.type,
-          category: n.category || '',
-          subcategory: n.subcategory || '',
-          article_type: n.article_type || '',
-          color: getNodeColor(n),
-          size: n.type === 'wiki' ? 35 : 25,
-        },
-      }))
-      const cyEdges = edges
-        .filter((e) => nodeSet.has(e.source) && nodeSet.has(e.target))
-        .map((e, i) => ({ data: { id: `e${i}`, source: e.source, target: e.target } }))
+    ctx.clearRect(0, 0, w, h)
+    ctx.save()
+    ctx.translate(t.x, t.y)
+    ctx.scale(t.k, t.k)
 
-      const cy = cytoscape({
-        container: containerRef.current,
-        elements: [...cyNodes, ...cyEdges],
-        style: [
-          {
-            selector: 'node',
-            style: {
-              'background-color': 'data(color)',
-              label: 'data(label)',
-              'font-size': '9px',
-              'font-family': 'system-ui, sans-serif',
-              color: '#78716C',
-              'text-valign': 'bottom',
-              'text-margin-y': 5,
-              width: 'data(size)',
-              height: 'data(size)',
-              'border-width': 1.5,
-              'border-color': '#E7E5E4',
-            },
-          },
-          { selector: 'node[type="wiki"]', style: { shape: 'diamond' } },
-          { selector: 'node:selected', style: { 'border-width': 3, 'border-color': '#1C1917' } },
-          { selector: 'node.highlighted', style: { 'border-width': 3, 'border-color': '#F59E0B' } },
-          { selector: 'node.dimmed', style: { opacity: 0.15 } },
-          {
-            selector: 'edge',
-            style: {
-              width: 1.2,
-              'line-color': '#D6D3D1',
-              'target-arrow-color': '#A8A29E',
-              'target-arrow-shape': 'triangle',
-              'curve-style': 'bezier',
-              'arrow-scale': 0.7,
-            },
-          },
-          { selector: 'edge.highlighted', style: { 'line-color': '#F59E0B', 'target-arrow-color': '#F59E0B', width: 2 } },
-          { selector: 'edge.dimmed', style: { opacity: 0.08 } },
-        ],
-        layout: {
-          name: 'cola',
-          animate: true,
-          infinite: false,
-          maxSimulationTime: 3000,
-          fit: true,
-          nodeDimensionsIncludeLabels: true,
-          edgeLength: 100,
-          nodeSpacing: 25,
-          padding: 60,
-          handleDisconnected: true,
-          avoidOverlap: true,
-          centerGraph: true,
-          randomize: false,
-          ungrabifyWhileSimulating: false,
-        } as cytoscape.LayoutOptions,
-        minZoom: 0.1,
-        maxZoom: 5,
-        wheelSensitivity: 0.3,
-      })
+    const hasHighlight = highlightIds.size > 0
 
-      cy.on('tap', 'node', (e) => {
-        const node = e.target
-        const nd: GraphNode = {
-          id: node.data('id'),
-          label: node.data('fullLabel'),
-          type: node.data('type'),
-          category: node.data('category'),
-          subcategory: node.data('subcategory'),
-          article_type: node.data('article_type'),
-        }
-        setSelectedNode(nd)
-        cy.elements().removeClass('highlighted dimmed')
-        cy.elements().addClass('dimmed')
-        node.removeClass('dimmed').addClass('highlighted')
-        node.neighborhood().removeClass('dimmed').addClass('highlighted')
-      })
-
-      cy.on('tap', (e) => {
-        if (e.target === cy) {
-          setSelectedNode(null)
-          setPanelOpen(false)
-          cy.elements().removeClass('highlighted dimmed')
-        }
-      })
-
-      // Physics on drag release: node stays where you drop it, neighbors adjust
-      let dragLayout: cytoscape.Layouts | undefined
-      cy.on('free', 'node', (e) => {
-        const node = e.target
-        const pos = node.position()
-        dragLayout?.stop()
-        // Lock the dragged node at its new position, run layout on everything else
-        node.lock()
-        dragLayout = cy.layout({
-          name: 'cola',
-          animate: true,
-          infinite: false,
-          maxSimulationTime: 1000,
-          fit: false,
-          nodeDimensionsIncludeLabels: true,
-          edgeLength: 100,
-          nodeSpacing: 25,
-          handleDisconnected: true,
-          avoidOverlap: true,
-          ungrabifyWhileSimulating: false,
-          randomize: false,
-        } as cytoscape.LayoutOptions)
-        dragLayout.run()
-        // Unlock after simulation settles
-        setTimeout(() => {
-          node.unlock()
-          node.position(pos)
-        }, 1100)
-      })
-
-      cyRef.current = cy
-    } catch { /* silent */ }
-  }, [])
-
-  useEffect(() => {
-    initGraph()
-    return () => { cyRef.current?.destroy() }
-  }, [initGraph])
-
-  useEffect(() => {
-    const cy = cyRef.current
-    if (!cy) return
-    cy.elements().removeClass('highlighted dimmed')
-    if (!search) return
-    const lower = search.toLowerCase()
-    const matches = cy.nodes().filter((n) =>
-      n.data('fullLabel').toLowerCase().includes(lower) ||
-      n.data('category').toLowerCase().includes(lower) ||
-      n.data('article_type').toLowerCase().includes(lower)
-    )
-    if (matches.length > 0) {
-      cy.elements().addClass('dimmed')
-      matches.forEach((n) => {
-        n.removeClass('dimmed').addClass('highlighted')
-        n.neighborhood().removeClass('dimmed').addClass('highlighted')
-      })
+    // Edges
+    for (const link of linksRef.current) {
+      const s = link.source as GNode
+      const tgt = link.target as GNode
+      if (s.x == null || tgt.x == null) continue
+      const dimmed = hasHighlight && !highlightIds.has(s.id) && !highlightIds.has(tgt.id)
+      ctx.beginPath()
+      ctx.moveTo(s.x, s.y!)
+      ctx.lineTo(tgt.x, tgt.y!)
+      ctx.strokeStyle = dimmed ? 'rgba(231,229,228,0.15)' : '#D6D3D1'
+      ctx.lineWidth = dimmed ? 0.5 : 1
+      ctx.stroke()
     }
+
+    // Nodes
+    for (const node of nodesRef.current) {
+      if (node.x == null) continue
+      const isSelected = selectedNode?.id === node.id
+      const dimmed = hasHighlight && !highlightIds.has(node.id)
+      const r = node.type === 'wiki' ? 7 : 5
+      const color = nodeColor(node)
+
+      ctx.globalAlpha = dimmed ? 0.12 : 1
+
+      if (node.type === 'wiki') {
+        ctx.save()
+        ctx.translate(node.x, node.y!)
+        ctx.rotate(Math.PI / 4)
+        ctx.fillStyle = color
+        ctx.fillRect(-r * 0.7, -r * 0.7, r * 1.4, r * 1.4)
+        ctx.restore()
+      } else {
+        ctx.beginPath()
+        ctx.arc(node.x, node.y!, r, 0, Math.PI * 2)
+        ctx.fillStyle = color
+        ctx.fill()
+      }
+
+      if (isSelected) {
+        ctx.beginPath()
+        ctx.arc(node.x, node.y!, r + 3, 0, Math.PI * 2)
+        ctx.strokeStyle = '#1C1917'
+        ctx.lineWidth = 1.5
+        ctx.stroke()
+      }
+
+      // Label
+      ctx.font = '4px system-ui, sans-serif'
+      ctx.textAlign = 'center'
+      ctx.fillStyle = dimmed ? 'rgba(120,113,108,0.3)' : '#78716C'
+      const label = node.label.length > 16 ? node.label.slice(0, 16) + '…' : node.label
+      ctx.fillText(label, node.x, node.y! + r + 7)
+
+      ctx.globalAlpha = 1
+    }
+
+    ctx.restore()
+  }, [selectedNode, highlightIds])
+
+  // Init
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+
+    const resize = () => {
+      const parent = canvas.parentElement!
+      canvas.width = parent.clientWidth
+      canvas.height = parent.clientHeight
+      draw()
+    }
+    resize()
+    window.addEventListener('resize', resize)
+
+    // Fetch data
+    const init = async () => {
+      try {
+        const { data } = await api.get('/api/graph')
+        const nodes: GNode[] = (data.nodes || []).map((n: any) => ({
+          ...n, label: n.label, category: n.category || '', subcategory: n.subcategory || '', article_type: n.article_type || '',
+        }))
+        const nodeSet = new Set(nodes.map(n => n.id))
+        const links: GLink[] = (data.edges || []).filter((e: any) => nodeSet.has(e.source) && nodeSet.has(e.target))
+        setStats({ nodes: nodes.length, edges: links.length })
+        nodesRef.current = nodes
+        linksRef.current = links
+
+        const sim = forceSimulation(nodes)
+          .force('link', forceLink<GNode, GLink>(links).id(d => d.id).distance(80))
+          .force('charge', forceManyBody().strength(-200))
+          .force('center', forceCenter(canvas.width / 2, canvas.height / 2))
+          .force('collide', forceCollide(20))
+          .alphaDecay(0.02)
+          .on('tick', draw)
+
+        simRef.current = sim
+
+        // Zoom
+        const zoomBehavior = d3Zoom<HTMLCanvasElement, unknown>()
+          .scaleExtent([0.1, 6])
+          .on('zoom', (event) => {
+            transformRef.current = event.transform
+            draw()
+          })
+        select(canvas).call(zoomBehavior)
+
+        // Drag
+        const findNode = (x: number, y: number): GNode | undefined => {
+          const t = transformRef.current
+          const mx = (x - t.x) / t.k
+          const my = (y - t.y) / t.k
+          return nodes.find(n => {
+            const r = n.type === 'wiki' ? 10 : 8
+            return n.x != null && Math.hypot(n.x - mx, n.y! - my) < r
+          })
+        }
+
+        let draggedNode: GNode | undefined
+        const dragBehavior = d3Drag<HTMLCanvasElement, unknown>()
+          .subject((event) => {
+            const node = findNode(event.x, event.y)
+            return node || null
+          })
+          .on('start', (event) => {
+            draggedNode = findNode(event.x, event.y)
+            if (!draggedNode) return
+            sim.alphaTarget(0.3).restart()
+            draggedNode.fx = draggedNode.x
+            draggedNode.fy = draggedNode.y
+          })
+          .on('drag', (event) => {
+            if (!draggedNode) return
+            const t = transformRef.current
+            draggedNode.fx = (event.x - t.x) / t.k
+            draggedNode.fy = (event.y - t.y) / t.k
+          })
+          .on('end', () => {
+            if (!draggedNode) return
+            sim.alphaTarget(0)
+            draggedNode.fx = null
+            draggedNode.fy = null
+            draggedNode = undefined
+          })
+
+        select(canvas).call(dragBehavior as any)
+
+        // Click
+        canvas.addEventListener('click', (event) => {
+          const node = findNode(event.offsetX, event.offsetY)
+          if (node) {
+            setSelectedNode(node)
+          } else {
+            setSelectedNode(null)
+            setPanelOpen(false)
+            setHighlightIds(new Set())
+          }
+        })
+
+      } catch { /* silent */ }
+    }
+    init()
+
+    return () => {
+      window.removeEventListener('resize', resize)
+      simRef.current?.stop()
+    }
+  }, [draw])
+
+  // Search highlight
+  useEffect(() => {
+    if (!search) { setHighlightIds(new Set()); return }
+    const lower = search.toLowerCase()
+    const ids = new Set(
+      nodesRef.current
+        .filter(n => n.label.toLowerCase().includes(lower) || n.category.toLowerCase().includes(lower) || n.article_type.toLowerCase().includes(lower))
+        .map(n => n.id)
+    )
+    setHighlightIds(ids)
   }, [search])
 
-  const openPanel = useCallback(async (node: GraphNode) => {
+  // Highlight selected + neighbors
+  useEffect(() => {
+    if (!selectedNode || search) return
+    const ids = new Set([selectedNode.id])
+    for (const link of linksRef.current) {
+      const s = (link.source as GNode).id || link.source as string
+      const t = (link.target as GNode).id || link.target as string
+      if (s === selectedNode.id) ids.add(t)
+      if (t === selectedNode.id) ids.add(s)
+    }
+    setHighlightIds(ids)
+  }, [selectedNode, search])
+
+  const openPanel = useCallback(async (node: GNode) => {
     setPanelOpen(true)
     setPanelMode('preview')
     setPanelContent('Loading...')
     try {
-      const endpoint = node.type === 'wiki' ? `/api/wiki/${node.id}` : `/api/documents/${node.id}`
-      const { data } = await api.get(endpoint)
+      const ep = node.type === 'wiki' ? `/api/wiki/${node.id}` : `/api/documents/${node.id}`
+      const { data } = await api.get(ep)
       setPanelContent(data.content || '')
       setEditContent(data.content || '')
-    } catch {
-      setPanelContent('Failed to load content.')
-    }
+    } catch { setPanelContent('Failed to load.') }
   }, [])
 
   const handlePanelSave = useCallback(async () => {
@@ -259,16 +290,14 @@ export function GraphPage() {
     finally { setPanelSaving(false) }
   }, [selectedNode, editContent])
 
-  const closePanel = () => {
-    setPanelOpen(false)
-    setSelectedNode(null)
-    cyRef.current?.elements().removeClass('highlighted dimmed')
-  }
+  const closePanel = () => { setPanelOpen(false); setSelectedNode(null); setHighlightIds(new Set()) }
 
   const handleFit = () => {
-    const cy = cyRef.current
-    if (!cy) return
-    cy.animate({ fit: { eles: cy.elements(), padding: 60 }, duration: 400 })
+    const canvas = canvasRef.current
+    if (!canvas) return
+    transformRef.current = zoomIdentity
+    simRef.current?.alpha(0.3).restart()
+    draw()
   }
 
   return (
@@ -291,7 +320,7 @@ export function GraphPage() {
       </header>
 
       <div className="flex flex-1 overflow-hidden relative">
-        <div ref={containerRef} className="flex-1 bg-bg-primary" />
+        <canvas ref={canvasRef} className="flex-1 bg-bg-primary cursor-grab active:cursor-grabbing" />
 
         {/* Legend */}
         <div className="absolute bottom-4 left-4 bg-bg-secondary/90 backdrop-blur-sm border border-border rounded-[8px] px-3 py-2 flex gap-4 text-[10px]">
@@ -306,16 +335,12 @@ export function GraphPage() {
           <aside className="absolute top-4 right-4 w-[240px] bg-bg-secondary/95 backdrop-blur-sm border border-border rounded-[12px] p-4 shadow-lg">
             <div className="flex items-start justify-between mb-2">
               <div className="flex-1 min-w-0">
-                <span className="text-[10px] font-bold uppercase tracking-[1px] text-accent-primary">
-                  {selectedNode.type === 'wiki' ? selectedNode.article_type : 'Document'}
-                </span>
+                <span className="text-[10px] font-bold uppercase tracking-[1px] text-accent-primary">{selectedNode.type === 'wiki' ? selectedNode.article_type : 'Document'}</span>
                 <h3 className="text-xs font-semibold text-text-primary mt-0.5 leading-snug">{selectedNode.label}</h3>
               </div>
-              <button onClick={() => { setSelectedNode(null); cyRef.current?.elements().removeClass('highlighted dimmed') }} className="p-1 hover:bg-bg-tertiary rounded"><X size={11} className="text-text-tertiary" /></button>
+              <button onClick={() => { setSelectedNode(null); setHighlightIds(new Set()) }} className="p-1 hover:bg-bg-tertiary rounded"><X size={11} className="text-text-tertiary" /></button>
             </div>
-            <div className="flex flex-col gap-1 text-[10px] mb-3">
-              {selectedNode.category && <div className="flex justify-between"><span className="text-text-tertiary">Category</span><span className="text-text-secondary">{selectedNode.category}</span></div>}
-            </div>
+            {selectedNode.category && <div className="flex justify-between text-[10px] mb-3"><span className="text-text-tertiary">Category</span><span className="text-text-secondary">{selectedNode.category}</span></div>}
             <button onClick={() => openPanel(selectedNode)} className="w-full flex items-center justify-center gap-1.5 py-2 bg-accent-primary rounded-[6px] text-[11px] font-semibold text-bg-primary hover:bg-accent-secondary transition-colors">
               <Expand size={12} /> Open Document
             </button>
