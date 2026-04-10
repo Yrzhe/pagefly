@@ -107,42 +107,62 @@ def _run_ocr(client: Mistral, pdf_path: Path):
 
 
 def _run_ocr_image_fallback(client: Mistral, pdf_path: Path):
-    """Fallback: render each page as image, create a new image-based PDF, then OCR that."""
+    """Fallback: render pages as images, split into batches, OCR each batch."""
     import fitz  # pymupdf
     import tempfile
+    from dataclasses import dataclass
 
     logger.info("Converting PDF pages to images for OCR fallback: %s", pdf_path.name)
     doc = fitz.open(str(pdf_path))
     page_count = len(doc)
 
-    # Render pages as images and build a new PDF from them
-    new_pdf = fitz.open()
-    for page_num in range(page_count):
-        page = doc[page_num]
-        pix = page.get_pixmap(dpi=200)
-        img_bytes = pix.tobytes("png")
+    BATCH_SIZE = 10
+    DPI = 150
 
-        # Create a new page with the image
-        img_doc = fitz.open("png", img_bytes)
-        rect = img_doc[0].rect
-        new_page = new_pdf.new_page(width=rect.width, height=rect.height)
-        new_page.insert_image(rect, stream=img_bytes)
-        img_doc.close()
+    # Collect all OCR results
+    all_pages = []
+
+    for batch_start in range(0, page_count, BATCH_SIZE):
+        batch_end = min(batch_start + BATCH_SIZE, page_count)
+        logger.info("Processing pages %d-%d of %d", batch_start + 1, batch_end, page_count)
+
+        # Build a small PDF from this batch
+        batch_pdf = fitz.open()
+        for page_num in range(batch_start, batch_end):
+            page = doc[page_num]
+            pix = page.get_pixmap(dpi=DPI)
+            img_bytes = pix.tobytes("png")
+
+            img_doc = fitz.open("png", img_bytes)
+            rect = img_doc[0].rect
+            new_page = batch_pdf.new_page(width=rect.width, height=rect.height)
+            new_page.insert_image(rect, stream=img_bytes)
+            img_doc.close()
+
+        tmp = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
+        batch_pdf.save(tmp.name)
+        batch_pdf.close()
+
+        try:
+            batch_result = _run_ocr(client, Path(tmp.name))
+            all_pages.extend(batch_result.pages)
+        except Exception as e:
+            logger.warning("Batch %d-%d OCR failed: %s", batch_start + 1, batch_end, e)
+        finally:
+            Path(tmp.name).unlink(missing_ok=True)
 
     doc.close()
 
-    # Save to temp file
-    tmp = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
-    new_pdf.save(tmp.name)
-    new_pdf.close()
+    if not all_pages:
+        raise RuntimeError("All batches failed")
 
-    logger.info("Image-based PDF created: %d pages, sending to Mistral OCR", page_count)
+    # Build a combined response-like object
+    @dataclass
+    class CombinedResponse:
+        pages: list
 
-    try:
-        result = _run_ocr(client, Path(tmp.name))
-        return result
-    finally:
-        Path(tmp.name).unlink(missing_ok=True)
+    logger.info("OCR fallback complete: %d pages processed", len(all_pages))
+    return CombinedResponse(pages=all_pages)
 
 
 def _extract_images(ocr_response, pdf_name: str) -> list[ImageAsset]:
