@@ -59,6 +59,9 @@ export function KnowledgePage() {
   const [loading, setLoading] = useState(true)
   const [expandedCats, setExpandedCats] = useState<Set<string>>(new Set())
 
+  const [uploading, setUploading] = useState(false)
+  const [uploadStatus, setUploadStatus] = useState('')
+
   const fetchDocuments = useCallback(async () => {
     try {
       const { data } = await api.get('/api/documents', { params: { limit: 200 } })
@@ -171,26 +174,51 @@ export function KnowledgePage() {
               className="flex-1 bg-transparent text-sm text-text-primary placeholder:text-text-tertiary outline-none"
             />
           </div>
-          <label className="flex items-center gap-1.5 px-4 py-2 bg-accent-primary rounded-[8px] text-xs font-semibold text-bg-primary hover:bg-accent-secondary transition-colors cursor-pointer">
+          <label className={cn(
+            "flex items-center gap-1.5 px-4 py-2 rounded-[8px] text-xs font-semibold transition-colors cursor-pointer",
+            uploading ? "bg-bg-tertiary text-text-tertiary cursor-wait" : "bg-accent-primary text-bg-primary hover:bg-accent-secondary"
+          )}>
             <Upload size={13} />
-            Upload
+            {uploading ? 'Uploading...' : 'Upload'}
             <input
               type="file"
               className="hidden"
+              disabled={uploading}
               accept=".pdf,.md,.txt,.docx,.png,.jpg,.jpeg,.mp3,.wav,.m4a"
               onChange={async (e) => {
                 const file = e.target.files?.[0]
                 if (!file) return
+                setUploading(true)
+                setUploadStatus(`Uploading ${file.name}...`)
                 const form = new FormData()
                 form.append('file', file)
                 try {
                   await api.post('/api/ingest', form)
+                  setUploadStatus(`Uploaded: ${file.name}. Classifying...`)
                   fetchDocuments()
-                } catch { /* silent */ }
+                  // Poll for classification to complete
+                  let polls = 0
+                  const pollInterval = setInterval(async () => {
+                    polls++
+                    await fetchDocuments()
+                    if (polls >= 10) {
+                      clearInterval(pollInterval)
+                      setUploadStatus('')
+                    }
+                  }, 3000)
+                  setTimeout(() => { clearInterval(pollInterval); setUploadStatus('') }, 30000)
+                } catch {
+                  setUploadStatus('Upload failed')
+                  setTimeout(() => setUploadStatus(''), 3000)
+                }
+                setUploading(false)
                 e.target.value = ''
               }}
             />
           </label>
+          {uploadStatus && (
+            <span className="text-[11px] text-accent-primary animate-pulse">{uploadStatus}</span>
+          )}
         </div>
       </header>
 
