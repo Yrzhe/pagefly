@@ -109,14 +109,15 @@ def _run_ocr(client: Mistral, pdf_path: Path):
 def _run_ocr_image_fallback(client: Mistral, pdf_path: Path):
     """Fallback: render each page as image, create a new image-based PDF, then OCR that."""
     import fitz  # pymupdf
-    import io
+    import tempfile
 
     logger.info("Converting PDF pages to images for OCR fallback: %s", pdf_path.name)
     doc = fitz.open(str(pdf_path))
+    page_count = len(doc)
 
     # Render pages as images and build a new PDF from them
     new_pdf = fitz.open()
-    for page_num in range(len(doc)):
+    for page_num in range(page_count):
         page = doc[page_num]
         pix = page.get_pixmap(dpi=200)
         img_bytes = pix.tobytes("png")
@@ -128,14 +129,14 @@ def _run_ocr_image_fallback(client: Mistral, pdf_path: Path):
         new_page.insert_image(rect, stream=img_bytes)
         img_doc.close()
 
+    doc.close()
+
     # Save to temp file
-    import tempfile
     tmp = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
     new_pdf.save(tmp.name)
     new_pdf.close()
-    doc.close()
 
-    logger.info("Image-based PDF created: %d pages, sending to Mistral OCR", len(doc))
+    logger.info("Image-based PDF created: %d pages, sending to Mistral OCR", page_count)
 
     try:
         result = _run_ocr(client, Path(tmp.name))
