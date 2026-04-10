@@ -800,7 +800,7 @@ async def delete_workspace_folder(folder_name: str):
 async def get_knowledge_graph():
     """Build a graph of documents and wiki articles with their references."""
     conn = db.get_connection()
-    docs = conn.execute("SELECT id, title, category, subcategory, status FROM documents").fetchall()
+    docs = conn.execute("SELECT id, title, category, subcategory, status FROM documents WHERE status != 'error'").fetchall()
     wikis = conn.execute("SELECT id, title, article_type, source_document_ids FROM wiki_articles").fetchall()
     conn.close()
 

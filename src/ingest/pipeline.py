@@ -51,6 +51,8 @@ def ingest(input_data: IngestInput) -> str | None:
 
     folder_name = _build_folder_name(result.title, doc_id)
     metadata["title"] = result.title
+    if result.has_error:
+        metadata["ingest_error"] = True
     doc_dir = RAW_DIR / folder_name
 
     # Atomic ingest: write files then DB (single transaction), rollback both on failure
@@ -58,9 +60,10 @@ def ingest(input_data: IngestInput) -> str | None:
         _write_document(doc_dir, result, metadata)
         with db.transaction() as conn:
             conn.execute(
-                """INSERT INTO documents (id, title, source_type, original_filename, current_path, ingested_at)
-                VALUES (?, ?, ?, ?, ?, ?)""",
-                (doc_id, result.title, source_type, input_data.original_filename, str(doc_dir), metadata["ingested_at"]),
+                """INSERT INTO documents (id, title, source_type, original_filename, current_path, ingested_at, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (doc_id, result.title, source_type, input_data.original_filename, str(doc_dir), metadata["ingested_at"],
+                 "error" if result.has_error else "raw"),
             )
             conn.execute(
                 """INSERT INTO operations_log (document_id, operation, from_path, to_path, details_json, created_at)
@@ -86,9 +89,12 @@ def ingest(input_data: IngestInput) -> str | None:
 
     logger.info("Ingested document: %s (id=%s)", doc_dir.name, doc_id[:8])
 
-    # Trigger background classification immediately
-    from src.governance.auto_classify import schedule_classify
-    schedule_classify(doc_dir, doc_id)
+    # Trigger background classification (skip error documents)
+    if not result.has_error:
+        from src.governance.auto_classify import schedule_classify
+        schedule_classify(doc_dir, doc_id)
+    else:
+        logger.info("Skipping classification for error document: %s", doc_id[:8])
 
     return doc_id
 

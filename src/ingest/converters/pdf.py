@@ -57,6 +57,7 @@ def convert(input_data: IngestInput) -> ConvertResult:
                 ),
                 title=pdf_name,
                 images=[],
+                has_error=True,
             )
 
     images = _extract_images(ocr_response, pdf_name)

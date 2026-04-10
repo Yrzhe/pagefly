@@ -85,3 +85,4 @@ class ConvertResult:
     title: str
     suggested_tags: list[str] = field(default_factory=list)
     images: list[ImageAsset] = field(default_factory=list)
+    has_error: bool = False

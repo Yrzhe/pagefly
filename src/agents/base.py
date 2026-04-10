@@ -60,6 +60,8 @@ async def list_knowledge_docs(args):
     for meta_path in sorted(KNOWLEDGE_DIR.rglob("metadata.json")):
         try:
             meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            if meta.get("ingest_error"):
+                continue  # Skip failed documents
             docs.append({
                 "id": meta.get("id", ""),
                 "title": meta.get("title", ""),
