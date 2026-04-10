@@ -184,7 +184,7 @@ export function KnowledgePage() {
                 const form = new FormData()
                 form.append('file', file)
                 try {
-                  await api.post('/api/ingest', form, { headers: { 'Content-Type': 'multipart/form-data' } })
+                  await api.post('/api/ingest', form)
                   fetchDocuments()
                 } catch { /* silent */ }
                 e.target.value = ''
