@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Settings, Shield, FolderTree, Server, Lock, Eye, EyeOff } from 'lucide-react'
+import { Settings, Shield, FolderTree, Server, Lock, Eye, EyeOff, Plus, Pencil, Trash2, Check, X } from 'lucide-react'
 import api from '@/api/client'
 
 interface Stats {
@@ -99,22 +99,7 @@ export function SettingsPage() {
 
         {/* Categories */}
         <Section icon={<FolderTree size={14} />} title="Knowledge Categories">
-          {stats ? (
-            <div className="flex flex-col gap-1.5">
-              {Object.entries(stats.categories).sort((a, b) => b[1] - a[1]).map(([cat, count]) => (
-                <div key={cat} className="flex items-center justify-between px-3 py-2 bg-bg-secondary rounded-[6px]">
-                  <span className="text-xs text-text-primary">{cat}</span>
-                  <span className="text-[10px] font-mono text-text-tertiary">{count} docs</span>
-                </div>
-              ))}
-              {Object.keys(stats.categories).length === 0 && (
-                <p className="text-xs text-text-tertiary">No categories yet. Documents get classified automatically on ingest.</p>
-              )}
-              <p className="text-[10px] text-text-tertiary mt-1">Edit categories in config/categories.json</p>
-            </div>
-          ) : (
-            <p className="text-xs text-text-tertiary">Loading...</p>
-          )}
+          <CategoryEditor docCounts={stats?.categories || {}} />
         </Section>
 
         {/* System */}
@@ -141,6 +126,113 @@ function Section({ icon, title, children }: { icon: React.ReactNode; title: stri
         <span className="text-[10px] font-bold uppercase tracking-[1.5px] text-accent-primary">{title}</span>
       </div>
       {children}
+    </div>
+  )
+}
+
+function CategoryEditor({ docCounts }: { docCounts: Record<string, number> }) {
+  const [categories, setCategories] = useState<{ id: string; name: string }[]>([])
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editValue, setEditValue] = useState('')
+  const [newId, setNewId] = useState('')
+  const [newName, setNewName] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [msg, setMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
+
+  const fetchCategories = useCallback(async () => {
+    try {
+      const { data } = await api.get('/api/categories')
+      setCategories(data.categories || [])
+    } catch { /* silent */ }
+  }, [])
+
+  useEffect(() => { fetchCategories() }, [fetchCategories])
+
+  const handleAdd = async () => {
+    if (!newId.trim() || !newName.trim()) return
+    setLoading(true)
+    setMsg(null)
+    try {
+      await api.post('/api/categories', { id: newId.trim().toLowerCase().replace(/\s+/g, '-'), name: newName.trim() })
+      setNewId('')
+      setNewName('')
+      await fetchCategories()
+      setMsg({ type: 'ok', text: 'Category added' })
+    } catch (e: any) { setMsg({ type: 'err', text: e.response?.data?.detail || 'Failed' }) }
+    finally { setLoading(false) }
+  }
+
+  const handleRename = async (oldId: string) => {
+    if (!editValue.trim() || editValue === oldId) { setEditingId(null); return }
+    setLoading(true)
+    setMsg(null)
+    try {
+      await api.put(`/api/categories/${oldId}`, { new_id: editValue.trim().toLowerCase().replace(/\s+/g, '-') })
+      setEditingId(null)
+      await fetchCategories()
+      setMsg({ type: 'ok', text: `Renamed "${oldId}" → "${editValue.trim()}" (including all documents, metadata, and files)` })
+    } catch (e: any) { setMsg({ type: 'err', text: e.response?.data?.detail || 'Failed' }) }
+    finally { setLoading(false) }
+  }
+
+  const handleDelete = async (catId: string) => {
+    const count = docCounts[catId] || 0
+    if (!confirm(`Delete category "${catId}"?${count > 0 ? ` ${count} documents will become uncategorized.` : ''}`)) return
+    setLoading(true)
+    try {
+      await api.delete(`/api/categories/${catId}`)
+      await fetchCategories()
+      setMsg({ type: 'ok', text: `Category "${catId}" removed from config` })
+    } catch (e: any) { setMsg({ type: 'err', text: e.response?.data?.detail || 'Failed' }) }
+    finally { setLoading(false) }
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      {/* Category list */}
+      {categories.map((cat) => {
+        const count = docCounts[cat.id] || 0
+        return (
+          <div key={cat.id} className="group flex items-center gap-2 px-3 py-2 bg-bg-secondary rounded-[6px]">
+            {editingId === cat.id ? (
+              <>
+                <input
+                  value={editValue}
+                  onChange={(e) => setEditValue(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleRename(cat.id); if (e.key === 'Escape') setEditingId(null) }}
+                  className="flex-1 text-xs bg-bg-primary border border-accent-primary rounded px-2 py-1 outline-none"
+                  autoFocus
+                />
+                <button onClick={() => handleRename(cat.id)} disabled={loading} className="p-1 text-success"><Check size={12} /></button>
+                <button onClick={() => setEditingId(null)} className="p-1 text-text-tertiary"><X size={12} /></button>
+              </>
+            ) : (
+              <>
+                <span className="flex-1 text-xs text-text-primary">{cat.id}</span>
+                <span className="text-[10px] text-text-tertiary">{cat.name}</span>
+                {count > 0 && <span className="text-[9px] font-mono text-text-tertiary bg-bg-tertiary px-1.5 py-0.5 rounded">{count}</span>}
+                <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button onClick={() => { setEditingId(cat.id); setEditValue(cat.id) }} className="p-1 text-text-tertiary hover:text-accent-primary"><Pencil size={10} /></button>
+                  <button onClick={() => handleDelete(cat.id)} className="p-1 text-text-tertiary hover:text-error"><Trash2 size={10} /></button>
+                </div>
+              </>
+            )}
+          </div>
+        )
+      })}
+
+      {/* Add new */}
+      <div className="flex gap-2">
+        <input value={newId} onChange={(e) => setNewId(e.target.value)} placeholder="ID (e.g. machine-learning)" className="flex-1 px-3 py-2 text-xs border border-border rounded-[6px] bg-bg-primary text-text-primary placeholder:text-text-tertiary outline-none focus:border-accent-primary" />
+        <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Display name" className="flex-1 px-3 py-2 text-xs border border-border rounded-[6px] bg-bg-primary text-text-primary placeholder:text-text-tertiary outline-none focus:border-accent-primary" />
+        <button onClick={handleAdd} disabled={loading || !newId.trim() || !newName.trim()} className="flex items-center gap-1 px-3 py-2 bg-accent-primary rounded-[6px] text-xs font-semibold text-bg-primary hover:bg-accent-secondary transition-colors disabled:opacity-60">
+          <Plus size={12} /> Add
+        </button>
+      </div>
+
+      {msg && <span className={`text-[11px] ${msg.type === 'ok' ? 'text-success' : 'text-error'}`}>{msg.text}</span>}
+
+      <p className="text-[10px] text-text-tertiary">Renaming a category updates config, database, filesystem, and all metadata files automatically.</p>
     </div>
   )
 }

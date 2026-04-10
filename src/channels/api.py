@@ -858,6 +858,111 @@ async def revoke_token(token_id: str):
     return {"status": "ok"}
 
 
+# ── Categories ──
+
+@app.get("/api/categories", dependencies=[Depends(verify_token)])
+async def get_categories():
+    """Get category definitions from config."""
+    from src.shared.config import load_categories
+    return load_categories()
+
+
+@app.put("/api/categories/{old_id}", dependencies=[Depends(verify_token)])
+async def rename_category(old_id: str, body: dict):
+    """Rename a category with full cascade: config + DB + filesystem + metadata."""
+    import shutil
+    from src.shared.config import CONFIG_DIR, KNOWLEDGE_DIR, load_categories
+
+    new_id = body.get("new_id", "").strip()
+    new_name = body.get("new_name", "").strip()
+    if not new_id:
+        raise HTTPException(status_code=400, detail="new_id required")
+
+    # 1. Update categories.json
+    cats_path = CONFIG_DIR / "categories.json"
+    cats_data = load_categories()
+    cat_def = next((c for c in cats_data["categories"] if c["id"] == old_id), None)
+    if not cat_def:
+        raise HTTPException(status_code=404, detail=f"Category '{old_id}' not found")
+    cat_def["id"] = new_id
+    if new_name:
+        cat_def["name"] = new_name
+    cats_path.write_text(json.dumps(cats_data, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    # 2. Rename filesystem directory
+    old_dir = KNOWLEDGE_DIR / old_id
+    new_dir = KNOWLEDGE_DIR / new_id
+    if old_dir.exists() and old_dir != new_dir:
+        if new_dir.exists():
+            raise HTTPException(status_code=409, detail=f"Directory '{new_id}' already exists")
+        old_dir.rename(new_dir)
+
+    # 3. Update all metadata.json files in the renamed directory
+    updated_files = 0
+    if new_dir.exists():
+        for meta_path in new_dir.rglob("metadata.json"):
+            try:
+                meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                if meta.get("category") == old_id:
+                    meta["category"] = new_id
+                    meta_path.write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
+                    updated_files += 1
+            except Exception:
+                continue
+
+    # 4. Update database
+    conn = db.get_connection()
+    conn.execute("UPDATE documents SET category = ? WHERE category = ?", (new_id, old_id))
+    # Update current_path column
+    rows = conn.execute("SELECT id, current_path FROM documents WHERE category = ?", (new_id,)).fetchall()
+    for row in rows:
+        old_path = row["current_path"]
+        if old_id in old_path:
+            new_path = old_path.replace(f"/{old_id}/", f"/{new_id}/")
+            conn.execute("UPDATE documents SET current_path = ? WHERE id = ?", (new_path, row["id"]))
+    conn.commit()
+    conn.close()
+
+    logger.info("Category renamed: %s → %s (%d metadata files updated)", old_id, new_id, updated_files)
+    return {"status": "ok", "old_id": old_id, "new_id": new_id, "files_updated": updated_files}
+
+
+@app.post("/api/categories", dependencies=[Depends(verify_token)])
+async def add_category(body: dict):
+    """Add a new category to config."""
+    from src.shared.config import CONFIG_DIR, load_categories
+
+    cat_id = body.get("id", "").strip()
+    cat_name = body.get("name", "").strip()
+    if not cat_id or not cat_name:
+        raise HTTPException(status_code=400, detail="id and name required")
+
+    cats_path = CONFIG_DIR / "categories.json"
+    cats_data = load_categories()
+    if any(c["id"] == cat_id for c in cats_data["categories"]):
+        raise HTTPException(status_code=409, detail=f"Category '{cat_id}' already exists")
+
+    cats_data["categories"].append({"id": cat_id, "name": cat_name, "subcategories": []})
+    cats_path.write_text(json.dumps(cats_data, indent=2, ensure_ascii=False), encoding="utf-8")
+    return {"status": "ok", "id": cat_id}
+
+
+@app.delete("/api/categories/{cat_id}", dependencies=[Depends(verify_token)])
+async def delete_category(cat_id: str):
+    """Delete a category from config (does NOT delete documents — they become uncategorized)."""
+    from src.shared.config import CONFIG_DIR, load_categories
+
+    cats_path = CONFIG_DIR / "categories.json"
+    cats_data = load_categories()
+    original_len = len(cats_data["categories"])
+    cats_data["categories"] = [c for c in cats_data["categories"] if c["id"] != cat_id]
+    if len(cats_data["categories"]) == original_len:
+        raise HTTPException(status_code=404, detail=f"Category '{cat_id}' not found")
+
+    cats_path.write_text(json.dumps(cats_data, indent=2, ensure_ascii=False), encoding="utf-8")
+    return {"status": "ok"}
+
+
 # ── Stats ──
 
 @app.get("/api/stats", dependencies=[Depends(verify_token)])
