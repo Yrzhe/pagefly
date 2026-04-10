@@ -184,7 +184,7 @@ export function KnowledgePage() {
               type="file"
               className="hidden"
               disabled={uploading}
-              accept=".pdf,.md,.txt,.docx,.png,.jpg,.jpeg,.mp3,.wav,.m4a"
+              accept=".pdf,.md,.txt,.markdown,.docx,.doc,.png,.jpg,.jpeg,.webp,.mp3,.wav,.ogg,.m4a"
               onChange={async (e) => {
                 const file = e.target.files?.[0]
                 if (!file) return
