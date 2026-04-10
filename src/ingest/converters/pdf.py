@@ -44,16 +44,20 @@ def convert(input_data: IngestInput) -> ConvertResult:
     try:
         ocr_response = _run_ocr(client, pdf_path)
     except Exception as e:
-        logger.error("PDF OCR completely failed for %s: %s", pdf_name, e)
-        return ConvertResult(
-            markdown=(
-                f"# {pdf_name}\n\n"
-                f"> ⚠️ OCR failed after {MAX_RETRIES} retries: {e}\n\n"
-                f"Original file: {input_data.original_filename or pdf_name}"
-            ),
-            title=pdf_name,
-            images=[],
-        )
+        logger.warning("Mistral OCR failed for %s, trying image-based fallback: %s", pdf_name, e)
+        try:
+            ocr_response = _run_ocr_image_fallback(client, pdf_path)
+        except Exception as e2:
+            logger.error("PDF OCR completely failed for %s: %s", pdf_name, e2)
+            return ConvertResult(
+                markdown=(
+                    f"# {pdf_name}\n\n"
+                    f"> OCR failed after all attempts: {e2}\n\n"
+                    f"Original file: {input_data.original_filename or pdf_name}"
+                ),
+                title=pdf_name,
+                images=[],
+            )
 
     images = _extract_images(ocr_response, pdf_name)
     markdown = _build_markdown(ocr_response, images)
@@ -100,6 +104,44 @@ def _run_ocr(client: Mistral, pdf_path: Path):
     )
 
     return ocr_response
+
+
+def _run_ocr_image_fallback(client: Mistral, pdf_path: Path):
+    """Fallback: render each page as image, create a new image-based PDF, then OCR that."""
+    import fitz  # pymupdf
+    import io
+
+    logger.info("Converting PDF pages to images for OCR fallback: %s", pdf_path.name)
+    doc = fitz.open(str(pdf_path))
+
+    # Render pages as images and build a new PDF from them
+    new_pdf = fitz.open()
+    for page_num in range(len(doc)):
+        page = doc[page_num]
+        pix = page.get_pixmap(dpi=200)
+        img_bytes = pix.tobytes("png")
+
+        # Create a new page with the image
+        img_doc = fitz.open("png", img_bytes)
+        rect = img_doc[0].rect
+        new_page = new_pdf.new_page(width=rect.width, height=rect.height)
+        new_page.insert_image(rect, stream=img_bytes)
+        img_doc.close()
+
+    # Save to temp file
+    import tempfile
+    tmp = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
+    new_pdf.save(tmp.name)
+    new_pdf.close()
+    doc.close()
+
+    logger.info("Image-based PDF created: %d pages, sending to Mistral OCR", len(doc))
+
+    try:
+        result = _run_ocr(client, Path(tmp.name))
+        return result
+    finally:
+        Path(tmp.name).unlink(missing_ok=True)
 
 
 def _extract_images(ocr_response, pdf_name: str) -> list[ImageAsset]:
