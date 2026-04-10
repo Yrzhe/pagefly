@@ -8,7 +8,7 @@ services:
     volumes:
       - ./data:/app/data
       - ./config:/app/config
-      - ./config.json:/app/config.json:ro
+      - ./config.json:/app/config.json
     ports:
       - "0.0.0.0:80:8000"
       - "127.0.0.1:8000:8000"
