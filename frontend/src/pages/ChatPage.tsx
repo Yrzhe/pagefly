@@ -11,10 +11,18 @@ interface Message {
   ts?: string
 }
 
+const SLASH_COMMANDS = [
+  { cmd: '/search', desc: 'Search documents by keyword', args: '<keyword>' },
+  { cmd: '/status', desc: 'Show knowledge base stats', args: '' },
+  { cmd: '/save', desc: 'Save conversation as memo', args: '' },
+  { cmd: '/reset', desc: 'Clear conversation context', args: '' },
+]
+
 export function ChatPage() {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
+  const [showCommands, setShowCommands] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
@@ -37,7 +45,18 @@ export function ChatPage() {
     const msg = input.trim()
     if (!msg || sending) return
     setInput('')
+    setShowCommands(false)
     setSending(true)
+
+    // Handle local /reset command
+    if (msg === '/reset') {
+      try {
+        await api.post('/api/chat/reset')
+        setMessages([])
+      } catch { /* silent */ }
+      setSending(false)
+      return
+    }
 
     // Optimistic add user message
     const userMsg: Message = { role: 'user', content: msg }
@@ -51,6 +70,17 @@ export function ChatPage() {
     } catch {
       setMessages((prev) => [...prev, { role: 'assistant', content: 'Something went wrong. Please try again.' }])
     } finally { setSending(false) }
+  }
+
+  const handleInputChange = (value: string) => {
+    setInput(value)
+    setShowCommands(value === '/')
+  }
+
+  const selectCommand = (cmd: string) => {
+    setInput(cmd + ' ')
+    setShowCommands(false)
+    inputRef.current?.focus()
   }
 
   const handleReset = async () => {
@@ -136,24 +166,42 @@ export function ChatPage() {
 
       {/* Input */}
       <div className="border-t border-border px-6 py-4 flex-shrink-0">
-        <div className="max-w-[760px] mx-auto flex gap-3">
-          <textarea
-            ref={inputRef}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Ask about your knowledge base... (Enter to send, Shift+Enter for newline)"
-            rows={1}
-            className="flex-1 px-4 py-3 border border-border rounded-[10px] bg-bg-primary text-sm text-text-primary placeholder:text-text-tertiary outline-none focus:border-accent-primary resize-none"
-            disabled={sending}
-          />
-          <button
-            onClick={handleSend}
-            disabled={sending || !input.trim()}
-            className="px-4 py-3 bg-accent-primary rounded-[10px] text-bg-primary hover:bg-accent-secondary transition-colors disabled:opacity-40 flex-shrink-0"
-          >
-            <Send size={16} />
-          </button>
+        <div className="max-w-[760px] mx-auto relative">
+          {/* Slash command dropdown */}
+          {showCommands && (
+            <div className="absolute bottom-full mb-2 left-0 w-80 bg-bg-secondary border border-border rounded-[10px] shadow-lg overflow-hidden">
+              {SLASH_COMMANDS.map((c) => (
+                <button
+                  key={c.cmd}
+                  onClick={() => selectCommand(c.cmd)}
+                  className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-bg-tertiary transition-colors text-left"
+                >
+                  <code className="text-xs font-mono text-accent-primary">{c.cmd}</code>
+                  <span className="text-xs text-text-secondary">{c.desc}</span>
+                  {c.args && <span className="text-[10px] text-text-tertiary ml-auto">{c.args}</span>}
+                </button>
+              ))}
+            </div>
+          )}
+          <div className="flex gap-3">
+            <textarea
+              ref={inputRef}
+              value={input}
+              onChange={(e) => handleInputChange(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Ask about your knowledge base... (/ for commands)"
+              rows={1}
+              className="flex-1 px-4 py-3 border border-border rounded-[10px] bg-bg-primary text-sm text-text-primary placeholder:text-text-tertiary outline-none focus:border-accent-primary resize-none"
+              disabled={sending}
+            />
+            <button
+              onClick={handleSend}
+              disabled={sending || !input.trim()}
+              className="px-4 py-3 bg-accent-primary rounded-[10px] text-bg-primary hover:bg-accent-secondary transition-colors disabled:opacity-40 flex-shrink-0"
+            >
+              <Send size={16} />
+            </button>
+          </div>
         </div>
       </div>
     </div>

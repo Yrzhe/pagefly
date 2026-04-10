@@ -8,6 +8,7 @@ import {
   Key,
   Search,
   Settings,
+  MessageCircle,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -18,6 +19,7 @@ const NAV_ITEMS = [
   { to: '/workspace', label: 'Workspace', icon: FolderOpen },
   { to: '/graph', label: 'Graph', icon: GitFork },
   { to: '/api', label: 'API', icon: Key },
+  { to: '/chat', label: 'Chat', icon: MessageCircle },
   { to: '/search', label: 'Search', icon: Search },
   { to: '/settings', label: 'Settings', icon: Settings },
 ] as const
