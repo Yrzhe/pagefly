@@ -177,14 +177,31 @@ function CategoryEditor({ docCounts }: { docCounts: Record<string, number> }) {
 
   const handleDelete = async (catId: string) => {
     const count = docCounts[catId] || 0
-    if (!confirm(`Delete category "${catId}"?${count > 0 ? ` ${count} documents will become uncategorized.` : ''}`)) return
-    setLoading(true)
-    try {
-      await api.delete(`/api/categories/${catId}`)
-      await fetchCategories()
-      setMsg({ type: 'ok', text: `Category "${catId}" removed from config` })
-    } catch (e: any) { setMsg({ type: 'err', text: e.response?.data?.detail || 'Failed' }) }
-    finally { setLoading(false) }
+    const others = categories.filter((c) => c.id !== catId)
+
+    if (count > 0 && others.length > 0) {
+      const target = prompt(
+        `Category "${catId}" has ${count} documents.\n\nMerge them into which category?\n\nOptions: ${others.map((c) => c.id).join(', ')}\n\n(Leave empty to just remove the category from config)`
+      )
+      if (target === null) return // cancelled
+      setLoading(true)
+      try {
+        const params = target.trim() ? `?merge_into=${encodeURIComponent(target.trim())}` : ''
+        await api.delete(`/api/categories/${catId}${params}`)
+        await fetchCategories()
+        setMsg({ type: 'ok', text: target.trim() ? `"${catId}" merged into "${target.trim()}" (${count} docs moved)` : `Category "${catId}" removed` })
+      } catch (e: any) { setMsg({ type: 'err', text: e.response?.data?.detail || 'Failed' }) }
+      finally { setLoading(false) }
+    } else {
+      if (!confirm(`Delete category "${catId}"?`)) return
+      setLoading(true)
+      try {
+        await api.delete(`/api/categories/${catId}`)
+        await fetchCategories()
+        setMsg({ type: 'ok', text: `Category "${catId}" removed` })
+      } catch (e: any) { setMsg({ type: 'err', text: e.response?.data?.detail || 'Failed' }) }
+      finally { setLoading(false) }
+    }
   }
 
   return (

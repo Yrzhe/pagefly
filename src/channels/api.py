@@ -948,19 +948,61 @@ async def add_category(body: dict):
 
 
 @app.delete("/api/categories/{cat_id}", dependencies=[Depends(verify_token)])
-async def delete_category(cat_id: str):
-    """Delete a category from config (does NOT delete documents — they become uncategorized)."""
-    from src.shared.config import CONFIG_DIR, load_categories
+async def delete_category(cat_id: str, merge_into: str = Query(default="")):
+    """Delete a category. If merge_into is set, move all documents to that category first."""
+    import shutil
+    from src.shared.config import CONFIG_DIR, KNOWLEDGE_DIR, load_categories
 
     cats_path = CONFIG_DIR / "categories.json"
     cats_data = load_categories()
-    original_len = len(cats_data["categories"])
-    cats_data["categories"] = [c for c in cats_data["categories"] if c["id"] != cat_id]
-    if len(cats_data["categories"]) == original_len:
+    cat_def = next((c for c in cats_data["categories"] if c["id"] == cat_id), None)
+    if not cat_def:
         raise HTTPException(status_code=404, detail=f"Category '{cat_id}' not found")
 
+    source_dir = KNOWLEDGE_DIR / cat_id
+    moved_count = 0
+
+    if merge_into:
+        # Validate target exists
+        if not any(c["id"] == merge_into for c in cats_data["categories"]):
+            raise HTTPException(status_code=404, detail=f"Target category '{merge_into}' not found")
+        if merge_into == cat_id:
+            raise HTTPException(status_code=400, detail="Cannot merge into self")
+
+        target_dir = KNOWLEDGE_DIR / merge_into
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        # Move all document folders from source to target
+        if source_dir.exists():
+            for item in source_dir.iterdir():
+                if item.is_dir():
+                    dest = target_dir / item.name
+                    shutil.move(str(item), str(dest))
+                    # Update metadata.json
+                    meta_path = dest / "metadata.json"
+                    if meta_path.exists():
+                        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                        meta["category"] = merge_into
+                        meta_path.write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
+                    moved_count += 1
+            # Remove empty source directory
+            shutil.rmtree(str(source_dir), ignore_errors=True)
+
+        # Update database
+        conn = db.get_connection()
+        rows = conn.execute("SELECT id, current_path FROM documents WHERE category = ?", (cat_id,)).fetchall()
+        for row in rows:
+            new_path = row["current_path"].replace(f"/{cat_id}/", f"/{merge_into}/")
+            conn.execute("UPDATE documents SET category = ?, current_path = ? WHERE id = ?",
+                         (merge_into, new_path, row["id"]))
+        conn.commit()
+        conn.close()
+
+    # Remove from config
+    cats_data["categories"] = [c for c in cats_data["categories"] if c["id"] != cat_id]
     cats_path.write_text(json.dumps(cats_data, indent=2, ensure_ascii=False), encoding="utf-8")
-    return {"status": "ok"}
+
+    return {"status": "ok", "merged_into": merge_into or None, "documents_moved": moved_count}
 
 
 # ── Stats ──
