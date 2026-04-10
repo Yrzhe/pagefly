@@ -20,11 +20,16 @@ const SLASH_COMMANDS = [
 
 export function ChatPage() {
   const [messages, setMessages] = useState<Message[]>([])
+  const [allMessages, setAllMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
   const [showCommands, setShowCommands] = useState(false)
+  const [hasMore, setHasMore] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const loadingMoreRef = useRef(false)
+  const INITIAL_LOAD = 30
+  const LOAD_MORE = 20
 
   const scrollToBottom = () => {
     setTimeout(() => scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' }), 50)
@@ -33,13 +38,54 @@ export function ChatPage() {
   const fetchHistory = useCallback(async () => {
     try {
       const { data } = await api.get('/api/chat/history')
-      setMessages(data.messages || [])
-      scrollToBottom()
+      const all: Message[] = data.messages || []
+      setAllMessages(all)
+      // Show only last N messages initially
+      if (all.length > INITIAL_LOAD) {
+        setMessages(all.slice(-INITIAL_LOAD))
+        setHasMore(true)
+      } else {
+        setMessages(all)
+        setHasMore(false)
+      }
+      // Scroll to bottom after render
+      setTimeout(() => {
+        if (scrollRef.current) {
+          scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+        }
+      }, 100)
     } catch { /* silent */ }
   }, [])
 
   useEffect(() => { fetchHistory() }, [fetchHistory])
   useEffect(() => { inputRef.current?.focus() }, [])
+
+  // Load more when scrolling to top
+  const handleScroll = useCallback(() => {
+    const el = scrollRef.current
+    if (!el || loadingMoreRef.current || !hasMore) return
+    if (el.scrollTop < 100) {
+      loadingMoreRef.current = true
+      const prevHeight = el.scrollHeight
+      const shown = messages.length
+      const total = allMessages.length
+      const remaining = total - shown
+      if (remaining <= 0) {
+        setHasMore(false)
+        loadingMoreRef.current = false
+        return
+      }
+      const loadCount = Math.min(LOAD_MORE, remaining)
+      const start = remaining - loadCount
+      setMessages(allMessages.slice(start))
+      setHasMore(start > 0)
+      // Maintain scroll position
+      setTimeout(() => {
+        el.scrollTop = el.scrollHeight - prevHeight
+        loadingMoreRef.current = false
+      }, 50)
+    }
+  }, [messages.length, allMessages, hasMore])
 
   const handleSend = async () => {
     const msg = input.trim()
@@ -65,7 +111,9 @@ export function ChatPage() {
 
     try {
       const { data } = await api.post('/api/chat', { message: msg })
-      setMessages(data.messages || [])
+      const newMsgs = data.messages || []
+      setAllMessages(newMsgs)
+      setMessages(newMsgs.slice(-INITIAL_LOAD))
       scrollToBottom()
     } catch {
       setMessages((prev) => [...prev, { role: 'assistant', content: 'Something went wrong. Please try again.' }])
@@ -113,8 +161,13 @@ export function ChatPage() {
       </header>
 
       {/* Messages */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto">
+      <div ref={scrollRef} onScroll={handleScroll} className="flex-1 overflow-y-auto">
         <div className="max-w-[760px] mx-auto px-6 py-6 flex flex-col gap-4">
+          {hasMore && (
+            <div className="text-center py-2">
+              <span className="text-[10px] text-text-tertiary">Scroll up for older messages</span>
+            </div>
+          )}
           {messages.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-20 text-text-tertiary gap-3">
               <Bot size={40} className="opacity-20" />
