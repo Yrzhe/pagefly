@@ -188,16 +188,25 @@ async def ingest_file(file: UploadFile = File(...)):
             original_filename=file.filename,
         )
 
-        loop = asyncio.get_running_loop()
-        doc_id = await loop.run_in_executor(None, ingest, input_data)
+        # Run ingest in background so the API returns immediately
+        import concurrent.futures
+        _ingest_executor = concurrent.futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="api_ingest")
 
-        if doc_id:
-            return {"status": "ok", "doc_id": doc_id, "filename": file.filename}
-        else:
-            raise HTTPException(status_code=500, detail="Ingest failed")
-    finally:
+        def _bg_ingest():
+            try:
+                ingest(input_data)
+            except Exception as e:
+                logger.error("Background ingest failed for %s: %s", file.filename, e)
+            finally:
+                tmp_path.unlink(missing_ok=True)
+                tmp_path.parent.rmdir()
+
+        _ingest_executor.submit(_bg_ingest)
+        return {"status": "ok", "filename": file.filename, "message": "File received, processing in background"}
+    except Exception as e:
         tmp_path.unlink(missing_ok=True)
         tmp_path.parent.rmdir()
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ── Documents ──
