@@ -49,7 +49,7 @@ def convert(input_data: IngestInput) -> ConvertResult:
             markdown=(
                 f"# {pdf_name}\n\n"
                 f"> ⚠️ OCR failed after {MAX_RETRIES} retries: {e}\n\n"
-                f"Original file: {input_data.original_filename or pdf_name}.pdf"
+                f"Original file: {input_data.original_filename or pdf_name}"
             ),
             title=pdf_name,
             images=[],

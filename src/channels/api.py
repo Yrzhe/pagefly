@@ -152,6 +152,10 @@ def verify_master_token(credentials: HTTPAuthorizationCredentials = Depends(secu
 
 # ── Ingest ──
 
+# Background ingest executor (module-level singleton)
+_ingest_executor = __import__('concurrent.futures').futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="api_ingest")
+
+
 @app.post("/api/ingest", dependencies=[Depends(verify_token)])
 async def ingest_file(file: UploadFile = File(...)):
     """Upload and ingest a file."""
@@ -189,9 +193,6 @@ async def ingest_file(file: UploadFile = File(...)):
         )
 
         # Run ingest in background so the API returns immediately
-        import concurrent.futures
-        _ingest_executor = concurrent.futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="api_ingest")
-
         def _bg_ingest():
             try:
                 ingest(input_data)
@@ -199,7 +200,10 @@ async def ingest_file(file: UploadFile = File(...)):
                 logger.error("Background ingest failed for %s: %s", file.filename, e)
             finally:
                 tmp_path.unlink(missing_ok=True)
-                tmp_path.parent.rmdir()
+                try:
+                    tmp_path.parent.rmdir()
+                except OSError:
+                    pass
 
         _ingest_executor.submit(_bg_ingest)
         return {"status": "ok", "filename": file.filename, "message": "File received, processing in background"}
