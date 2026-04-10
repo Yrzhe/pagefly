@@ -11,6 +11,7 @@ from src.auth.service import (
     check_rate_limit,
     create_jwt,
     get_auth_steps,
+    hash_password,
     is_auth_configured,
     record_attempt,
     send_email_code,
@@ -184,3 +185,39 @@ async def verify_email_step(req: EmailCodeRequest, request: Request):
 
     del _partial_sessions[req.session_token]
     return {"status": "complete", "token": create_jwt(session["account"])}
+
+
+# ── Change Password ──
+
+class ChangePasswordRequest(BaseModel):
+    old_password: str
+    new_password: str
+
+
+@router.post("/change-password")
+async def change_password(req: ChangePasswordRequest, request: Request):
+    """Change account password. Requires valid JWT + current password."""
+    from src.channels.api import verify_token
+    # Auth is handled by the dependency in api.py, but we verify old password here
+    if not verify_password(req.old_password):
+        raise HTTPException(status_code=401, detail="Current password is incorrect")
+
+    if len(req.new_password) < 6:
+        raise HTTPException(status_code=400, detail="New password must be at least 6 characters")
+
+    new_hash = hash_password(req.new_password)
+
+    # Update config.json
+    import json
+    from src.shared.config import CONFIG_DIR
+    config_path = CONFIG_DIR / "config.json"
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    config["auth"]["password_hash"] = new_hash
+    config_path.write_text(json.dumps(config, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    # Update in-memory
+    import src.auth.service as svc
+    svc.AUTH_PASSWORD_HASH = new_hash
+
+    logger.info("Password changed successfully")
+    return {"status": "ok"}

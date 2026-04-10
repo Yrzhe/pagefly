@@ -10,6 +10,7 @@ import { WorkspacePage } from '@/pages/WorkspacePage'
 import { GraphPage } from '@/pages/GraphPage'
 import { ApiPage } from '@/pages/ApiPage'
 import { SearchPage } from '@/pages/SearchPage'
+import { SettingsPage } from '@/pages/SettingsPage'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuth()
@@ -90,6 +91,16 @@ export default function App() {
               <ProtectedRoute>
                 <AppLayout>
                   <SearchPage />
+                </AppLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/settings"
+            element={
+              <ProtectedRoute>
+                <AppLayout>
+                  <SettingsPage />
                 </AppLayout>
               </ProtectedRoute>
             }
