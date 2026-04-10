@@ -11,6 +11,7 @@ import { GraphPage } from '@/pages/GraphPage'
 import { ApiPage } from '@/pages/ApiPage'
 import { SearchPage } from '@/pages/SearchPage'
 import { SettingsPage } from '@/pages/SettingsPage'
+import { ChatPage } from '@/pages/ChatPage'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuth()
@@ -101,6 +102,16 @@ export default function App() {
               <ProtectedRoute>
                 <AppLayout>
                   <SettingsPage />
+                </AppLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/chat"
+            element={
+              <ProtectedRoute>
+                <AppLayout>
+                  <ChatPage />
                 </AppLayout>
               </ProtectedRoute>
             }

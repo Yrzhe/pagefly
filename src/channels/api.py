@@ -1032,6 +1032,55 @@ async def get_stats():
     }
 
 
+# ── Web Chat ──
+
+# Use Telegram chat_id for shared session. Fallback to 0 if not configured.
+def _web_chat_id() -> int:
+    from src.shared.config import TELEGRAM_CHAT_ID
+    return int(TELEGRAM_CHAT_ID) if TELEGRAM_CHAT_ID else 0
+
+
+@app.get("/api/chat/history", dependencies=[Depends(verify_token)])
+async def get_chat_history():
+    """Get chat history (shared with Telegram)."""
+    chat_id = _web_chat_id()
+    messages = db.load_session(chat_id) or []
+    return {"messages": messages, "chat_id": chat_id}
+
+
+@app.post("/api/chat", dependencies=[Depends(verify_token)])
+async def web_chat(body: dict):
+    """Send a message to the query agent (shared session with Telegram)."""
+    from src.agents.query import QuerySession, ask
+
+    user_message = body.get("message", "").strip()
+    if not user_message:
+        raise HTTPException(status_code=400, detail="message required")
+
+    chat_id = _web_chat_id()
+    saved = db.load_session(chat_id)
+    session = QuerySession(messages=saved) if saved else QuerySession()
+
+    # Trim if too long
+    if len(session.messages) > 100:
+        session.messages = session.messages[-100:]
+
+    response = await ask(user_message, session)
+
+    # Persist
+    db.save_session(chat_id, session.messages)
+
+    return {"response": response, "messages": session.messages}
+
+
+@app.post("/api/chat/reset", dependencies=[Depends(verify_token)])
+async def reset_chat():
+    """Clear chat history."""
+    chat_id = _web_chat_id()
+    db.save_session(chat_id, [])
+    return {"status": "ok"}
+
+
 # ── Trends ──
 
 @app.get("/api/trends", dependencies=[Depends(verify_token)])
