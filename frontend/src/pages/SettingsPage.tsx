@@ -86,15 +86,7 @@ export function SettingsPage() {
 
         {/* 2FA */}
         <Section icon={<Shield size={14} />} title="Two-Factor Authentication">
-          <div className="flex items-center justify-between p-3 bg-bg-secondary rounded-[8px]">
-            <div>
-              <p className="text-xs font-medium text-text-primary">TOTP Authenticator</p>
-              <p className="text-[10px] text-text-tertiary mt-0.5">Configure in config.json → auth.totp_secret</p>
-            </div>
-            <span className="text-[10px] font-bold px-2 py-1 rounded bg-bg-tertiary text-text-tertiary">
-              Configure via config.json
-            </span>
-          </div>
+          <TotpSetup />
         </Section>
 
         {/* Categories */}
@@ -126,6 +118,127 @@ function Section({ icon, title, children }: { icon: React.ReactNode; title: stri
         <span className="text-[10px] font-bold uppercase tracking-[1.5px] text-accent-primary">{title}</span>
       </div>
       {children}
+    </div>
+  )
+}
+
+function TotpSetup() {
+  const [enabled, setEnabled] = useState<boolean | null>(null)
+  const [setupData, setSetupData] = useState<{ session_id: string; secret: string; uri: string } | null>(null)
+  const [code, setCode] = useState('')
+  const [disablePassword, setDisablePassword] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [msg, setMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
+
+  useEffect(() => {
+    api.get('/api/auth/2fa/status').then(({ data }) => setEnabled(data.enabled)).catch(() => {})
+  }, [])
+
+  const handleStartSetup = async () => {
+    setLoading(true)
+    setMsg(null)
+    try {
+      const { data } = await api.post('/api/auth/2fa/setup')
+      setSetupData(data)
+    } catch (e: any) { setMsg({ type: 'err', text: e.response?.data?.detail || 'Failed' }) }
+    finally { setLoading(false) }
+  }
+
+  const handleConfirm = async () => {
+    if (!setupData || code.length !== 6) return
+    setLoading(true)
+    setMsg(null)
+    try {
+      await api.post('/api/auth/2fa/confirm', { session_id: setupData.session_id, code })
+      setEnabled(true)
+      setSetupData(null)
+      setCode('')
+      setMsg({ type: 'ok', text: '2FA enabled successfully' })
+    } catch (e: any) { setMsg({ type: 'err', text: e.response?.data?.detail || 'Invalid code' }) }
+    finally { setLoading(false) }
+  }
+
+  const handleDisable = async () => {
+    if (!disablePassword) return
+    setLoading(true)
+    setMsg(null)
+    try {
+      await api.post('/api/auth/2fa/disable', { password: disablePassword })
+      setEnabled(false)
+      setDisablePassword('')
+      setMsg({ type: 'ok', text: '2FA disabled' })
+    } catch (e: any) { setMsg({ type: 'err', text: e.response?.data?.detail || 'Failed' }) }
+    finally { setLoading(false) }
+  }
+
+  if (enabled === null) return <p className="text-xs text-text-tertiary">Loading...</p>
+
+  // Setup flow
+  if (setupData) {
+    return (
+      <div className="flex flex-col gap-4 p-4 bg-bg-secondary rounded-[8px] border border-border">
+        <div>
+          <p className="text-xs font-medium text-text-primary mb-1">Scan with your authenticator app:</p>
+          <div className="bg-white p-4 rounded-[8px] inline-block">
+            <img src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(setupData.uri)}`} alt="QR Code" className="w-[200px] h-[200px]" />
+          </div>
+        </div>
+        <div>
+          <p className="text-[10px] text-text-tertiary mb-1">Or enter this secret manually:</p>
+          <code className="text-xs font-mono bg-bg-primary px-3 py-1.5 rounded border border-border select-all">{setupData.secret}</code>
+        </div>
+        <div className="flex gap-2 items-center">
+          <input
+            value={code}
+            onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+            placeholder="6-digit code"
+            className="w-32 px-3 py-2 text-sm font-mono text-center border border-border rounded-[6px] bg-bg-primary text-text-primary outline-none focus:border-accent-primary tracking-widest"
+            maxLength={6}
+          />
+          <button onClick={handleConfirm} disabled={loading || code.length !== 6} className="px-4 py-2 bg-accent-primary rounded-[6px] text-xs font-semibold text-bg-primary hover:bg-accent-secondary transition-colors disabled:opacity-60">
+            Verify & Enable
+          </button>
+          <button onClick={() => { setSetupData(null); setCode('') }} className="px-3 py-2 border border-border rounded-[6px] text-xs text-text-secondary hover:bg-bg-secondary transition-colors">
+            Cancel
+          </button>
+        </div>
+        {msg && <span className={`text-[11px] ${msg.type === 'ok' ? 'text-success' : 'text-error'}`}>{msg.text}</span>}
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center justify-between p-3 bg-bg-secondary rounded-[8px]">
+        <div>
+          <p className="text-xs font-medium text-text-primary">TOTP Authenticator</p>
+          <p className="text-[10px] text-text-tertiary mt-0.5">{enabled ? 'Enabled — login requires a 6-digit code' : 'Not enabled'}</p>
+        </div>
+        {enabled ? (
+          <span className="text-[10px] font-bold px-2 py-1 rounded bg-green-50 text-green-700">Active</span>
+        ) : (
+          <button onClick={handleStartSetup} disabled={loading} className="px-3 py-1.5 bg-accent-primary rounded-[6px] text-[11px] font-semibold text-bg-primary hover:bg-accent-secondary transition-colors disabled:opacity-60">
+            Enable 2FA
+          </button>
+        )}
+      </div>
+
+      {enabled && (
+        <div className="flex gap-2 items-center">
+          <input
+            type="password"
+            value={disablePassword}
+            onChange={(e) => setDisablePassword(e.target.value)}
+            placeholder="Enter password to disable 2FA"
+            className="flex-1 px-3 py-2 text-xs border border-border rounded-[6px] bg-bg-primary text-text-primary placeholder:text-text-tertiary outline-none"
+          />
+          <button onClick={handleDisable} disabled={loading || !disablePassword} className="px-3 py-2 border border-error/30 rounded-[6px] text-xs text-error hover:bg-error/5 transition-colors disabled:opacity-60">
+            Disable 2FA
+          </button>
+        </div>
+      )}
+
+      {msg && <span className={`text-[11px] ${msg.type === 'ok' ? 'text-success' : 'text-error'}`}>{msg.text}</span>}
     </div>
   )
 }

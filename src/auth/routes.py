@@ -221,3 +221,96 @@ async def change_password(req: ChangePasswordRequest, request: Request):
 
     logger.info("Password changed successfully")
     return {"status": "ok"}
+
+
+# ── 2FA Setup ──
+
+# Temporary storage for pending 2FA setup (secret generated but not yet confirmed)
+_pending_totp: dict[str, str] = {}  # {session_id: secret}
+
+
+@router.get("/2fa/status")
+async def totp_status():
+    """Check if 2FA is currently enabled."""
+    import src.auth.service as svc
+    return {"enabled": bool(svc.TOTP_SECRET)}
+
+
+@router.post("/2fa/setup")
+async def totp_setup():
+    """Generate a new TOTP secret and return it as a provisioning URI + base32 secret."""
+    import base64
+    import src.auth.service as svc
+
+    # Generate random 20-byte secret
+    raw = secrets.token_bytes(20)
+    secret = base64.b32encode(raw).decode().rstrip("=")
+
+    session_id = secrets.token_urlsafe(16)
+    _pending_totp[session_id] = secret
+
+    # Build otpauth URI for QR code
+    account = svc.AUTH_ACCOUNT or "user"
+    uri = f"otpauth://totp/PageFly:{account}?secret={secret}&issuer=PageFly&digits=6&period=30"
+
+    return {"session_id": session_id, "secret": secret, "uri": uri}
+
+
+class Confirm2FARequest(BaseModel):
+    session_id: str
+    code: str
+
+
+@router.post("/2fa/confirm")
+async def totp_confirm(req: Confirm2FARequest):
+    """Verify the TOTP code against the pending secret, then save to config."""
+    import json
+    import src.auth.service as svc
+    from src.shared.config import CONFIG_DIR
+
+    secret = _pending_totp.get(req.session_id)
+    if not secret:
+        raise HTTPException(status_code=400, detail="No pending 2FA setup. Start with /2fa/setup first.")
+
+    # Verify the code against the pending secret
+    old_secret = svc.TOTP_SECRET
+    svc.TOTP_SECRET = secret
+    valid = svc.verify_totp(req.code)
+    if not valid:
+        svc.TOTP_SECRET = old_secret
+        raise HTTPException(status_code=401, detail="Invalid code. Please try again.")
+
+    # Save to config.json
+    config_path = CONFIG_DIR / "config.json"
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    if "auth" not in config:
+        config["auth"] = {}
+    config["auth"]["totp_secret"] = secret
+    config_path.write_text(json.dumps(config, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    del _pending_totp[req.session_id]
+    logger.info("2FA enabled successfully")
+    return {"status": "ok", "message": "2FA enabled"}
+
+
+@router.post("/2fa/disable")
+async def totp_disable(body: dict):
+    """Disable 2FA. Requires current password for safety."""
+    import json
+    import src.auth.service as svc
+    from src.shared.config import CONFIG_DIR
+
+    password = body.get("password", "")
+    if not verify_password(password):
+        raise HTTPException(status_code=401, detail="Incorrect password")
+
+    svc.TOTP_SECRET = ""
+
+    config_path = CONFIG_DIR / "config.json"
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    if "auth" in config:
+        config["auth"]["totp_secret"] = ""
+    config_path.write_text(json.dumps(config, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    logger.info("2FA disabled")
+    return {"status": "ok"}
