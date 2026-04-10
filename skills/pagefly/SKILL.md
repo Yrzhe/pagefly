@@ -1,178 +1,151 @@
-# PageFly Knowledge Base
+# PageFly — Personal Knowledge Base Skill
 
-Connect to your self-hosted PageFly knowledge base. Query your documents, search, upload files, and ask your AI agent — all from Claude Code.
+Connect to your self-hosted PageFly knowledge base. Query documents, search, upload files, read content, and chat with your AI agent — all from Claude Code.
+
+**Base directory**: The skill scripts are in `skills/pagefly/scripts/` relative to the PageFly repo root.
 
 ## Setup
 
-Set these environment variables or pass as flags:
-
+**Option 1: Environment variables** (recommended)
 ```bash
-export PAGEFLY_URL="https://your-pagefly-instance.com"   # Your PageFly API base URL
-export PAGEFLY_TOKEN="pf_your_api_token_here"             # API token from Settings > API & Tokens
+export PAGEFLY_URL="https://your-instance.com"
+export PAGEFLY_TOKEN="pf_your_api_token"
 ```
 
-Or configure in your project's `CLAUDE.md`:
+**Option 2: Interactive setup**
+```bash
+python3 skills/pagefly/scripts/setup.py
 ```
-PageFly: URL=https://your-instance.com TOKEN=pf_xxx
-```
+This creates `~/.config/pagefly/config.json` with your URL and token.
+
+**Get your token**: Open your PageFly dashboard → API & Tokens → Create Token → Copy.
 
 ## Commands
 
-### query
+All commands run Python scripts directly. No dependencies needed beyond Python 3.
 
-Ask a question to your knowledge base agent. The agent searches your documents and returns a grounded answer.
+### query — Ask your knowledge base
 
-**Usage**: `/pagefly query <question>`
+Ask a question. The agent searches your documents and returns a grounded answer with sources.
 
 ```bash
-curl -s -X POST "${PAGEFLY_URL}/api/query" \
-  -H "Authorization: Bearer ${PAGEFLY_TOKEN}" \
-  -H "Content-Type: application/json" \
-  -d "{\"question\": \"<QUESTION>\"}"
+python3 skills/pagefly/scripts/query.py "what do I know about transformer architectures"
 ```
 
-**Response**: `{ "question": "...", "answer": "..." }`
+Use when: you need context from your knowledge base before writing code, making a decision, or starting research.
 
-Example: `/pagefly query what do I know about transformer architectures`
-
-### search
+### search — Full-text search
 
 Search across all documents and wiki articles by keyword.
 
-**Usage**: `/pagefly search <keyword>`
-
 ```bash
-curl -s -X POST "${PAGEFLY_URL}/api/search" \
-  -H "Authorization: Bearer ${PAGEFLY_TOKEN}" \
-  -H "Content-Type: application/json" \
-  -d "{\"keyword\": \"<KEYWORD>\"}"
+python3 skills/pagefly/scripts/search.py "reinforcement learning"
 ```
 
-**Response**: `{ "keyword": "...", "total": N, "results": [{ "type": "knowledge|wiki", "id": "...", "title": "...", "snippet": "..." }] }`
+Returns: type (knowledge/wiki), title, snippet, and document ID for each match.
 
-### list
+### list — List documents
 
-List documents in your knowledge base. Optionally filter by category.
-
-**Usage**: `/pagefly list [category]`
+List all documents, optionally filtered by category.
 
 ```bash
-curl -s "${PAGEFLY_URL}/api/documents?limit=50" \
-  -H "Authorization: Bearer ${PAGEFLY_TOKEN}"
+python3 skills/pagefly/scripts/list_docs.py
+python3 skills/pagefly/scripts/list_docs.py "machine-learning"
 ```
 
-With category filter:
-```bash
-curl -s "${PAGEFLY_URL}/api/documents?category=<CATEGORY>&limit=50" \
-  -H "Authorization: Bearer ${PAGEFLY_TOKEN}"
-```
+### read — Read a document
 
-**Response**: `{ "documents": [{ "id": "...", "title": "...", "category": "...", "subcategory": "...", "status": "...", "ingested_at": "..." }], "total": N }`
-
-### read
-
-Read the full content of a specific document or wiki article.
-
-**Usage**: `/pagefly read <document_id>`
+Read the full markdown content of a document or wiki article.
 
 ```bash
-curl -s "${PAGEFLY_URL}/api/documents/<ID>" \
-  -H "Authorization: Bearer ${PAGEFLY_TOKEN}"
+python3 skills/pagefly/scripts/read_doc.py <document_id>
+python3 skills/pagefly/scripts/read_doc.py <wiki_id> --wiki
 ```
 
-**Response**: `{ "id": "...", "title": "...", "content": "...", "category": "...", ... }`
+### upload — Ingest a file
 
-For wiki articles:
-```bash
-curl -s "${PAGEFLY_URL}/api/wiki/<ID>" \
-  -H "Authorization: Bearer ${PAGEFLY_TOKEN}"
-```
-
-### upload
-
-Upload a file to your knowledge base. Supports PDF, markdown, text, docx, images, and audio files.
-
-**Usage**: `/pagefly upload <file_path>`
+Upload a file to your knowledge base. Supports PDF, markdown, text, docx, images (OCR), and audio (Whisper transcription).
 
 ```bash
-curl -s -X POST "${PAGEFLY_URL}/api/ingest" \
-  -H "Authorization: Bearer ${PAGEFLY_TOKEN}" \
-  -F "file=@<FILE_PATH>"
+python3 skills/pagefly/scripts/upload.py ./paper.pdf
+python3 skills/pagefly/scripts/upload.py ./meeting-notes.md
+python3 skills/pagefly/scripts/upload.py ./whiteboard-photo.jpg
 ```
 
-**Response**: `{ "doc_id": "...", "title": "...", "message": "..." }`
+The file is automatically converted, classified, and added to your knowledge base.
 
-The file will be automatically converted to markdown, classified, and added to your knowledge base.
+### wiki — List compiled wiki articles
 
-### wiki
-
-List all wiki articles compiled by the agent.
-
-**Usage**: `/pagefly wiki`
+List all wiki articles that the agent has compiled from your documents.
 
 ```bash
-curl -s "${PAGEFLY_URL}/api/wiki" \
-  -H "Authorization: Bearer ${PAGEFLY_TOKEN}"
+python3 skills/pagefly/scripts/wiki.py
 ```
 
-**Response**: `{ "articles": [{ "id": "...", "title": "...", "article_type": "concept|summary|connection", "created_at": "..." }] }`
+### chat — Chat with the agent
 
-### stats
-
-Show knowledge base statistics.
-
-**Usage**: `/pagefly stats`
+Send a message to the chat agent. Conversation history is shared with the Telegram bot.
 
 ```bash
-curl -s "${PAGEFLY_URL}/api/stats" \
-  -H "Authorization: Bearer ${PAGEFLY_TOKEN}"
+python3 skills/pagefly/scripts/chat.py "summarize my recent notes on startup strategy"
 ```
 
-**Response**: `{ "documents": N, "wiki_articles": N, "operations": N, "categories": { "cat1": N, ... } }`
+### stats — Knowledge base statistics
 
-### chat
-
-Send a message to the chat agent (shared with Telegram bot).
-
-**Usage**: `/pagefly chat <message>`
+Show document count, wiki article count, categories, and more.
 
 ```bash
-curl -s -X POST "${PAGEFLY_URL}/api/chat" \
-  -H "Authorization: Bearer ${PAGEFLY_TOKEN}" \
-  -H "Content-Type: application/json" \
-  -d "{\"message\": \"<MESSAGE>\"}"
+python3 skills/pagefly/scripts/stats.py
 ```
 
-**Response**: `{ "response": "...", "messages": [...] }`
+## Configuration File
 
-### graph
+After running `setup.py`, config is stored at `~/.config/pagefly/config.json`:
 
-Get the knowledge graph data (nodes and edges).
-
-**Usage**: `/pagefly graph`
-
-```bash
-curl -s "${PAGEFLY_URL}/api/graph" \
-  -H "Authorization: Bearer ${PAGEFLY_TOKEN}"
+```json
+{
+  "url": "https://your-instance.com",
+  "token": "pf_your_api_token"
+}
 ```
 
-**Response**: `{ "nodes": [{ "id": "...", "label": "...", "type": "document|wiki", "category": "..." }], "edges": [{ "source": "...", "target": "...", "relation": "..." }] }`
+Environment variables `PAGEFLY_URL` and `PAGEFLY_TOKEN` always override the config file.
 
 ## Use Cases
 
-- **Research context**: Before writing code or content, query your knowledge base for relevant background
-- **Save findings**: Upload PDFs, articles, or notes you find during work
-- **Cross-reference**: Search for connections between topics across your documents
-- **Chat**: Ask complex questions that require synthesizing multiple documents
-- **Check stats**: See how your knowledge base is growing
+- **Before coding**: `query.py "how does our auth system work"` — get context from past documents
+- **During research**: `upload.py paper.pdf` — save a paper you found, it gets auto-classified
+- **Cross-referencing**: `search.py "attention mechanism"` — find all related docs across your knowledge base
+- **Review learning**: `wiki.py` then `read_doc.py <id> --wiki` — read AI-compiled summaries
+- **Quick save**: `chat.py "remember: the deadline for the proposal is April 20"` — save a note via chat
+
+## REST API Reference
+
+For advanced usage, the full API is available:
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | /api/query | Agent Q&A (body: {question}) |
+| POST | /api/search | Full-text search (body: {keyword}) |
+| GET | /api/documents | List documents (?category, ?search, ?limit, ?offset) |
+| GET | /api/documents/{id} | Get document metadata + content |
+| POST | /api/ingest | Upload file (multipart/form-data) |
+| GET | /api/wiki | List wiki articles |
+| GET | /api/wiki/{id} | Get wiki article content |
+| POST | /api/chat | Chat message (body: {message}) |
+| GET | /api/chat/history | Get chat history |
+| GET | /api/graph | Knowledge graph nodes + edges |
+| GET | /api/stats | System statistics |
+
+All endpoints require `Authorization: Bearer <token>` header.
 
 ## Requirements
 
-- A running PageFly instance (self-hosted via Docker)
-- An API token (create one at your PageFly dashboard > API & Tokens)
-- `curl` available in the shell (standard on all systems)
+- Python 3.8+ (no pip packages needed — uses only stdlib)
+- A running PageFly instance
+- An API token
 
-## More Info
+## Links
 
 - GitHub: https://github.com/Yrzhe/pagefly
-- Docs: https://pagefly.ink
+- Demo: https://pagefly.ink
