@@ -7,7 +7,7 @@ services:
       - TZ=Asia/Shanghai
     volumes:
       - ./data:/app/data
-      - ./config:/app/config:ro
+      - ./config:/app/config
       - ./config.json:/app/config.json:ro
     ports:
       - "0.0.0.0:80:8000"

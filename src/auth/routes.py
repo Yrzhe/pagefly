@@ -244,7 +244,7 @@ async def totp_setup():
 
     # Generate random 20-byte secret
     raw = secrets.token_bytes(20)
-    secret = base64.b32encode(raw).decode().rstrip("=")
+    secret = base64.b32encode(raw).decode()  # Keep padding for b32decode compatibility
 
     session_id = secrets.token_urlsafe(16)
     _pending_totp[session_id] = secret
@@ -280,8 +280,9 @@ async def totp_confirm(req: Confirm2FARequest):
         svc.TOTP_SECRET = old_secret
         raise HTTPException(status_code=401, detail="Invalid code. Please try again.")
 
-    # Save to config.json
-    config_path = CONFIG_DIR / "config.json"
+    # Save to config.json (root dir, not config/)
+    from src.shared.config import ROOT_DIR
+    config_path = ROOT_DIR / "config.json"
     config = json.loads(config_path.read_text(encoding="utf-8"))
     if "auth" not in config:
         config["auth"] = {}
@@ -298,7 +299,7 @@ async def totp_disable(body: dict):
     """Disable 2FA. Requires current password for safety."""
     import json
     import src.auth.service as svc
-    from src.shared.config import CONFIG_DIR
+    from src.shared.config import ROOT_DIR
 
     password = body.get("password", "")
     if not verify_password(password):
@@ -306,7 +307,7 @@ async def totp_disable(body: dict):
 
     svc.TOTP_SECRET = ""
 
-    config_path = CONFIG_DIR / "config.json"
+    config_path = ROOT_DIR / "config.json"
     config = json.loads(config_path.read_text(encoding="utf-8"))
     if "auth" in config:
         config["auth"]["totp_secret"] = ""
