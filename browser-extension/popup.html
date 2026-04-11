@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      width: 420px;
+      max-height: 560px;
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #FFFEF5;
+      color: #1C1917;
+      font-size: 13px;
+    }
+
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 16px;
+      border-bottom: 1px solid #E7E5E4;
+      background: #FEF9EF;
+    }
+    .header h1 {
+      font-size: 14px;
+      font-weight: 700;
+      color: #1C1917;
+    }
+    .header .logo { color: #F59E0B; font-weight: 800; }
+    .header button {
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-size: 16px;
+      color: #78716C;
+    }
+
+    .tabs {
+      display: flex;
+      border-bottom: 1px solid #E7E5E4;
+    }
+    .tab {
+      flex: 1;
+      padding: 8px;
+      text-align: center;
+      font-size: 11px;
+      font-weight: 600;
+      background: none;
+      border: none;
+      cursor: pointer;
+      color: #78716C;
+      border-bottom: 2px solid transparent;
+    }
+    .tab.active {
+      color: #F59E0B;
+      border-bottom-color: #F59E0B;
+    }
+
+    .content { padding: 12px 16px; overflow-y: auto; max-height: 420px; }
+
+    .status {
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-size: 11px;
+      margin-bottom: 10px;
+    }
+    .status.info { background: #FFF3D0; color: #D97706; }
+    .status.success { background: #DCFCE7; color: #16A34A; }
+    .status.error { background: #FEE2E2; color: #DC2626; }
+
+    .preview-title {
+      font-size: 15px;
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+    .preview-meta {
+      font-size: 10px;
+      color: #A8A29E;
+      margin-bottom: 10px;
+    }
+    .preview-body {
+      font-size: 12px;
+      line-height: 1.6;
+      color: #1C1917;
+      background: #FFF8E7;
+      border: 1px solid #E7E5E4;
+      border-radius: 8px;
+      padding: 12px;
+      max-height: 280px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+    }
+
+    .actions {
+      padding: 12px 16px;
+      border-top: 1px solid #E7E5E4;
+      display: flex;
+      gap: 8px;
+    }
+    .btn {
+      flex: 1;
+      padding: 10px;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      border: none;
+      transition: background 0.15s;
+    }
+    .btn-primary {
+      background: #F59E0B;
+      color: #FFFEF5;
+    }
+    .btn-primary:hover { background: #D97706; }
+    .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-secondary {
+      background: none;
+      border: 1px solid #E7E5E4;
+      color: #78716C;
+    }
+    .btn-secondary:hover { background: #FFF8E7; }
+
+    /* Settings */
+    .form-group { margin-bottom: 12px; }
+    .form-group label {
+      display: block;
+      font-size: 11px;
+      font-weight: 600;
+      color: #78716C;
+      margin-bottom: 4px;
+    }
+    .form-group input {
+      width: 100%;
+      padding: 8px 10px;
+      border: 1px solid #E7E5E4;
+      border-radius: 6px;
+      font-size: 12px;
+      background: #FFFEF5;
+      color: #1C1917;
+      outline: none;
+    }
+    .form-group input:focus { border-color: #F59E0B; }
+
+    .test-result {
+      font-size: 11px;
+      margin-top: 6px;
+      padding: 6px 8px;
+      border-radius: 4px;
+    }
+    .test-result.ok { background: #DCFCE7; color: #16A34A; }
+    .test-result.fail { background: #FEE2E2; color: #DC2626; }
+
+    .loading {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 40px;
+      color: #A8A29E;
+      font-size: 12px;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1><span class="logo">PageFly</span> Clipper</h1>
+    <button id="settings-btn" title="Settings">&#9881;</button>
+  </div>
+
+  <div class="tabs" id="tabs">
+    <button class="tab active" data-tab="clip">Clip</button>
+    <button class="tab" data-tab="settings">Settings</button>
+  </div>
+
+  <!-- Clip Tab -->
+  <div id="clip-tab">
+    <div class="content" id="preview-content">
+      <div class="loading" id="loading">Extracting page content...</div>
+    </div>
+    <div class="actions" id="clip-actions" style="display:none;">
+      <button class="btn btn-secondary" id="re-extract">Re-extract</button>
+      <button class="btn btn-primary" id="upload-btn" disabled>Upload to PageFly</button>
+    </div>
+  </div>
+
+  <!-- Settings Tab -->
+  <div id="settings-tab" style="display:none;">
+    <div class="content">
+      <div class="form-group">
+        <label>PageFly API URL</label>
+        <input type="text" id="api-url" placeholder="https://api.pagefly.ink">
+      </div>
+      <div class="form-group">
+        <label>API Token</label>
+        <input type="password" id="api-token" placeholder="pf_...">
+      </div>
+      <div style="display:flex; gap:8px;">
+        <button class="btn btn-secondary" id="test-btn" style="flex:1;">Test Connection</button>
+        <button class="btn btn-primary" id="save-btn" style="flex:1;">Save</button>
+      </div>
+      <div id="test-result"></div>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
