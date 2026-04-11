@@ -3,27 +3,23 @@
     {
       "id": "research",
       "name": "Research",
-      "subcategories": ["semiconductor", "ai", "quant", "macro"]
+      "subcategories": [
+        "semiconductor",
+        "ai",
+        "quant",
+        "macro"
+      ]
     },
     {
       "id": "tech",
       "name": "Technology",
-      "subcategories": ["frontend", "backend", "ai-engineering", "devops", "tools"]
-    },
-    {
-      "id": "finance",
-      "name": "Finance",
-      "subcategories": ["a-shares", "us-stocks", "crypto", "investment-strategy"]
-    },
-    {
-      "id": "people",
-      "name": "People",
-      "subcategories": []
-    },
-    {
-      "id": "projects",
-      "name": "Projects",
-      "subcategories": []
+      "subcategories": [
+        "frontend",
+        "backend",
+        "ai-engineering",
+        "devops",
+        "tools"
+      ]
     },
     {
       "id": "ideas",
@@ -33,11 +29,6 @@
     {
       "id": "memo",
       "name": "Memo",
-      "subcategories": []
-    },
-    {
-      "id": "misc",
-      "name": "Uncategorized",
       "subcategories": []
     }
   ]
