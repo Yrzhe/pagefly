@@ -57,4 +57,5 @@ def get_headers() -> dict:
     return {
         "Authorization": f"Bearer {get_token()}",
         "Content-Type": "application/json",
+        "User-Agent": "PageFly-Skill/1.0",
     }
