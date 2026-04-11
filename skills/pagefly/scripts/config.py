@@ -4,16 +4,27 @@ import json
 import os
 from pathlib import Path
 
-CONFIG_FILE = Path.home() / ".config" / "pagefly" / "config.json"
+SKILL_DIR = Path(__file__).resolve().parent.parent
+SKILL_CONFIG = SKILL_DIR / "config.json"
+USER_CONFIG = Path.home() / ".config" / "pagefly" / "config.json"
 
 def load_config() -> dict:
-    """Load config from file, falling back to env vars."""
+    """Load config. Priority: env vars > skill dir config.json > ~/.config/pagefly/config.json"""
     config = {"url": "", "token": ""}
 
-    # Try config file first
-    if CONFIG_FILE.exists():
-        with open(CONFIG_FILE) as f:
+    # Try ~/.config/pagefly/config.json
+    if USER_CONFIG.exists():
+        with open(USER_CONFIG) as f:
             config.update(json.load(f))
+
+    # Skill directory config.json overrides
+    if SKILL_CONFIG.exists():
+        with open(SKILL_CONFIG) as f:
+            loaded = json.load(f)
+            if loaded.get("url"):
+                config["url"] = loaded["url"]
+            if loaded.get("token"):
+                config["token"] = loaded["token"]
 
     # Env vars override
     if os.environ.get("PAGEFLY_URL"):

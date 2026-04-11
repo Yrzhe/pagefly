@@ -2,23 +2,22 @@
 
 Connect to your self-hosted PageFly knowledge base. Query documents, search, upload files, read content, and chat with your AI agent — all from Claude Code.
 
-**Base directory**: The skill scripts are in `skills/pagefly/scripts/` relative to the PageFly repo root.
+Base directory for this skill: the directory containing this SKILL.md file.
 
 ## Setup
 
-**Option 1: Environment variables** (recommended)
-```bash
-export PAGEFLY_URL="https://your-instance.com"
-export PAGEFLY_TOKEN="pf_your_api_token"
-```
+Edit `config.json` in this skill's directory (same folder as this SKILL.md):
 
-**Option 2: Interactive setup**
-```bash
-python3 skills/pagefly/scripts/setup.py
+```json
+{
+  "url": "https://your-instance.com",
+  "token": "pf_your_api_token"
+}
 ```
-This creates `~/.config/pagefly/config.json` with your URL and token.
 
 **Get your token**: Open your PageFly dashboard → API & Tokens → Create Token → Copy.
+
+Alternative: set environment variables `PAGEFLY_URL` and `PAGEFLY_TOKEN` (override config.json).
 
 ## Commands
 
@@ -29,7 +28,7 @@ All commands run Python scripts directly. No dependencies needed beyond Python 3
 Ask a question. The agent searches your documents and returns a grounded answer with sources.
 
 ```bash
-python3 skills/pagefly/scripts/query.py "what do I know about transformer architectures"
+python3 scripts/query.py "what do I know about transformer architectures"
 ```
 
 Use when: you need context from your knowledge base before writing code, making a decision, or starting research.
@@ -39,7 +38,7 @@ Use when: you need context from your knowledge base before writing code, making 
 Search across all documents and wiki articles by keyword.
 
 ```bash
-python3 skills/pagefly/scripts/search.py "reinforcement learning"
+python3 scripts/search.py "reinforcement learning"
 ```
 
 Returns: type (knowledge/wiki), title, snippet, and document ID for each match.
@@ -49,8 +48,8 @@ Returns: type (knowledge/wiki), title, snippet, and document ID for each match.
 List all documents, optionally filtered by category.
 
 ```bash
-python3 skills/pagefly/scripts/list_docs.py
-python3 skills/pagefly/scripts/list_docs.py "machine-learning"
+python3 scripts/list_docs.py
+python3 scripts/list_docs.py "machine-learning"
 ```
 
 ### read — Read a document
@@ -58,8 +57,8 @@ python3 skills/pagefly/scripts/list_docs.py "machine-learning"
 Read the full markdown content of a document or wiki article.
 
 ```bash
-python3 skills/pagefly/scripts/read_doc.py <document_id>
-python3 skills/pagefly/scripts/read_doc.py <wiki_id> --wiki
+python3 scripts/read_doc.py <document_id>
+python3 scripts/read_doc.py <wiki_id> --wiki
 ```
 
 ### upload — Ingest a file
@@ -67,9 +66,9 @@ python3 skills/pagefly/scripts/read_doc.py <wiki_id> --wiki
 Upload a file to your knowledge base. Supports PDF, markdown, text, docx, images (OCR), and audio (Whisper transcription).
 
 ```bash
-python3 skills/pagefly/scripts/upload.py ./paper.pdf
-python3 skills/pagefly/scripts/upload.py ./meeting-notes.md
-python3 skills/pagefly/scripts/upload.py ./whiteboard-photo.jpg
+python3 scripts/upload.py ./paper.pdf
+python3 scripts/upload.py ./meeting-notes.md
+python3 scripts/upload.py ./whiteboard-photo.jpg
 ```
 
 The file is automatically converted, classified, and added to your knowledge base.
@@ -79,7 +78,7 @@ The file is automatically converted, classified, and added to your knowledge bas
 List all wiki articles that the agent has compiled from your documents.
 
 ```bash
-python3 skills/pagefly/scripts/wiki.py
+python3 scripts/wiki.py
 ```
 
 ### chat — Chat with the agent
@@ -87,7 +86,7 @@ python3 skills/pagefly/scripts/wiki.py
 Send a message to the chat agent. Conversation history is shared with the Telegram bot.
 
 ```bash
-python3 skills/pagefly/scripts/chat.py "summarize my recent notes on startup strategy"
+python3 scripts/chat.py "summarize my recent notes on startup strategy"
 ```
 
 ### stats — Knowledge base statistics
@@ -95,7 +94,7 @@ python3 skills/pagefly/scripts/chat.py "summarize my recent notes on startup str
 Show document count, wiki article count, categories, and more.
 
 ```bash
-python3 skills/pagefly/scripts/stats.py
+python3 scripts/stats.py
 ```
 
 ## Configuration File
