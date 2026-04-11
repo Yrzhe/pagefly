@@ -22,6 +22,9 @@ docker compose build
 echo "==> Cleaning dangling images..."
 docker image prune -f
 
+echo "==> Fixing data permissions..."
+chown -R 999:999 data/ config/ config.json 2>/dev/null || true
+
 echo "==> Starting container..."
 docker compose up -d
 
