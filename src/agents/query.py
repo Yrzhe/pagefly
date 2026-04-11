@@ -37,11 +37,12 @@ async def ask(
 
     # Build conversation context from session history
     if session and session.messages:
-        history = "\n".join(
-            f"{'User' if m['role'] == 'user' else 'Assistant'}: {m['content']}"
-            for m in session.messages[-20:]
-        )
-        prompt = f"Conversation history:\n{history}\n\nUser: {user_message}"
+        history_parts = []
+        for m in session.messages[-20:]:
+            tag = "user" if m["role"] == "user" else "assistant"
+            history_parts.append(f"<{tag}>{m['content']}</{tag}>")
+        history = "\n".join(history_parts)
+        prompt = f"<conversation_history>\n{history}\n</conversation_history>\n\n{user_message}"
     else:
         prompt = user_message
 
