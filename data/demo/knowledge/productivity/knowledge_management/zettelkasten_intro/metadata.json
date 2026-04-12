@@ -1,0 +1,22 @@
+{
+  "id": "demo0002-zett-elka-sten-intro00000000",
+  "title": "Zettelkasten: The Slip-Box Method",
+  "description": "An introduction to Niklas Luhmann's slip-box note-taking system, built around atomic notes and explicit linking.",
+  "source_type": "text",
+  "original_filename": "zettelkasten_intro.md",
+  "ingested_at": "2026-04-10T10:02:00+00:00",
+  "classified_at": "2026-04-10T10:02:45+00:00",
+  "status": "classified",
+  "location": "knowledge/productivity/knowledge_management/zettelkasten_intro",
+  "tags": ["zettelkasten", "note-taking", "luhmann", "knowledge-management"],
+  "category": "productivity",
+  "subcategory": "knowledge_management",
+  "relevance_score": 9,
+  "temporal_type": "evergreen",
+  "key_claims": [
+    "One idea per note — atomic notes force clear naming and precise linking",
+    "Organize notes by idea, not by topic or source",
+    "Links between notes are where new insights emerge"
+  ],
+  "references": []
+}

@@ -86,32 +86,50 @@ I saw the tweet and thought: what if we took this further? Not just a wiki, but 
 
 ## Quick Start
 
-### Prerequisites
+### Option A — One-click deploy (Railway)
 
-- Docker & Docker Compose
-- API keys: Claude (Anthropic), OpenAI (optional, for voice), Mistral (optional, for OCR)
-- Telegram bot token (optional)
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/new/template?template=https%3A%2F%2Fgithub.com%2FYrzhe%2Fpagefly)
 
-### 1. Clone & Configure
+Set `ANTHROPIC_API_KEY`, `PAGEFLY_EMAIL`, and `PAGEFLY_PASSWORD` in the Railway dashboard. Add a volume mounted at `/app/data` for persistence.
+
+### Option B — Docker (local / self-host)
+
+**Prerequisites**: Docker + Docker Compose, an [Anthropic API key](https://console.anthropic.com/).
 
 ```bash
 git clone https://github.com/Yrzhe/pagefly.git
 cd pagefly
-cp config.json.example config.json
-# Edit config.json with your API keys
-```
-
-### 2. Run with Docker
-
-```bash
+python -m src.cli setup      # interactive: email, password, API keys, demo data
 docker compose up -d
 ```
 
-### 3. Access
+The `setup` command generates a valid `config.json` with a hashed password and — if you accept — seeds a working demo knowledge base so you can see the system in action before adding your own documents.
 
-- **API**: `http://localhost:8000/docs` (Swagger UI)
-- **Telegram**: Message your bot to start ingesting
-- **Frontend**: `http://localhost:5173` (dev) or deploy to Cloudflare Pages
+**Already configured?** Skip `setup` and just `docker compose up -d`.
+
+### Option C — Minimal env-only boot
+
+No `config.json` needed. Export three env vars and launch:
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+export PAGEFLY_EMAIL=you@example.com
+export PAGEFLY_PASSWORD=your-password
+docker compose up -d
+```
+
+### Access
+
+- **Web UI**: `http://localhost` (or your configured port)
+- **API / Swagger**: `http://localhost:8000/docs`
+- **Telegram**: Message your bot to start ingesting (if configured)
+
+### Load demo data anytime
+
+```bash
+python -m src.cli load-demo     # adds 3 sample docs + 5 wiki articles
+python -m src.cli clear-demo    # removes them
+```
 
 ## Tech Stack
 
