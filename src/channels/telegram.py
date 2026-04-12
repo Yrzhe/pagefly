@@ -412,6 +412,7 @@ async def _handle_document(update: Update, context) -> None:
 
         doc_id = _ingest_file(str(tmp_path), filename)
         if doc_id:
+            _inject_ingest_context(chat_id, doc_id, filename)
             await update.message.reply_text(f"Ingested: {filename}\nDocument ID: {doc_id[:8]}")
         else:
             await update.message.reply_text(f"Failed to ingest: {filename}")
@@ -444,6 +445,7 @@ async def _handle_photo(update: Update, context) -> None:
 
         doc_id = _ingest_file(str(tmp_path), filename)
         if doc_id:
+            _inject_ingest_context(chat_id, doc_id, filename)
             await update.message.reply_text(f"Ingested photo: {doc_id[:8]}")
         else:
             await update.message.reply_text("Failed to ingest photo")
@@ -474,6 +476,7 @@ async def _handle_voice(update: Update, context) -> None:
 
         doc_id = _ingest_file(str(tmp_path), filename)
         if doc_id:
+            _inject_ingest_context(chat_id, doc_id, filename)
             await update.message.reply_text(f"Voice transcribed and ingested: {doc_id[:8]}")
         else:
             await update.message.reply_text("Failed to transcribe voice message")
@@ -504,6 +507,7 @@ async def _handle_audio(update: Update, context) -> None:
 
         doc_id = _ingest_file(str(tmp_path), filename)
         if doc_id:
+            _inject_ingest_context(chat_id, doc_id, filename)
             await update.message.reply_text(f"Audio transcribed and ingested: {doc_id[:8]}")
         else:
             await update.message.reply_text(f"Failed to transcribe: {filename}")
@@ -534,6 +538,7 @@ async def _handle_video(update: Update, context) -> None:
 
         doc_id = _ingest_file(str(tmp_path), filename)
         if doc_id:
+            _inject_ingest_context(chat_id, doc_id, filename)
             await update.message.reply_text(f"Video ingested: {doc_id[:8]}")
         else:
             await update.message.reply_text(f"Failed to process video: {filename}")
@@ -563,6 +568,46 @@ def _ingest_file(file_path: str, original_filename: str) -> str | None:
         original_filename=original_filename,
     )
     return ingest(input_data)
+
+
+def _inject_ingest_context(chat_id: int, doc_id: str, filename: str) -> None:
+    """Inject ingested document summary into the chat session so agent knows what was just added."""
+    try:
+        from src.storage.db import get_document
+        from src.shared.config import KNOWLEDGE_DIR, RAW_DIR
+        from datetime import datetime, timezone
+        import json
+
+        # Try to read the document content
+        doc = get_document(doc_id)
+        content_preview = ""
+        if doc and doc.get("current_path"):
+            md_path = Path(doc["current_path"]) / "document.md"
+            if md_path.exists():
+                content_preview = md_path.read_text(encoding="utf-8")[:500]
+
+        if not content_preview:
+            # Check raw/ if not classified yet
+            for d in RAW_DIR.iterdir():
+                if doc_id[:8] in d.name:
+                    md = d / "document.md"
+                    if md.exists():
+                        content_preview = md.read_text(encoding="utf-8")[:500]
+                    break
+
+        title = doc.get("title", filename) if doc else filename
+        summary = (
+            f"[System: A new document was just ingested into the knowledge base. "
+            f"Title: {title}. ID: {doc_id[:8]}. "
+            f"Content preview: {content_preview}]"
+        )
+
+        session = _get_session(chat_id)
+        ts = datetime.now(timezone.utc).astimezone().isoformat()
+        session.messages.append({"role": "assistant", "content": summary, "ts": ts})
+        _persist_session(chat_id)
+    except Exception as e:
+        logger.debug("Failed to inject ingest context: %s", e)
 
 
 def _cleanup_tmp(tmp_path: Path) -> None:
