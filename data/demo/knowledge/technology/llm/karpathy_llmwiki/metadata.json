@@ -1,0 +1,22 @@
+{
+  "id": "demo0001-karp-athy0-llmw-iki0000000000",
+  "title": "Karpathy's LLM Wiki Concept",
+  "description": "A proposal by Andrej Karpathy for a three-layer personal knowledge base where an LLM owns the synthesis layer.",
+  "source_type": "text",
+  "original_filename": "karpathy_llmwiki.md",
+  "ingested_at": "2026-04-10T09:15:00+00:00",
+  "classified_at": "2026-04-10T09:15:30+00:00",
+  "status": "classified",
+  "location": "knowledge/technology/llm/karpathy_llmwiki",
+  "tags": ["llm", "knowledge-management", "karpathy", "wiki"],
+  "category": "technology",
+  "subcategory": "llm",
+  "relevance_score": 10,
+  "temporal_type": "evergreen",
+  "key_claims": [
+    "Personal knowledge management bottleneck is synthesis, not capture",
+    "LLMs should own the wiki/synthesis layer, humans curate sources",
+    "Three layers: raw sources, wiki, query interface"
+  ],
+  "references": []
+}

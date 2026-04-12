@@ -1045,6 +1045,40 @@ async def get_stats():
     }
 
 
+# ── Demo data ──
+
+@app.post("/api/demo/load", dependencies=[Depends(verify_token)])
+async def load_demo_data():
+    """Load sample documents and wiki articles so new users see a working system."""
+    try:
+        from src import demo
+        import io
+        import contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            demo.load()
+        return {"status": "ok", "output": buf.getvalue()}
+    except Exception as e:
+        logger.error("Demo load failed: %s", e)
+        raise HTTPException(status_code=500, detail=f"Demo load failed: {e}")
+
+
+@app.post("/api/demo/clear", dependencies=[Depends(verify_token)])
+async def clear_demo_data():
+    """Remove demo documents and wiki articles."""
+    try:
+        from src import demo
+        import io
+        import contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            demo.clear()
+        return {"status": "ok", "output": buf.getvalue()}
+    except Exception as e:
+        logger.error("Demo clear failed: %s", e)
+        raise HTTPException(status_code=500, detail=f"Demo clear failed: {e}")
+
+
 # ── Web Chat ──
 
 # Use Telegram chat_id for shared session. Fallback to 0 if not configured.

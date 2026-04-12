@@ -28,6 +28,7 @@ COPY --from=builder /install /usr/local
 # Copy application code
 COPY src/ ./src/
 COPY config/ ./config/
+COPY data/demo/ ./data/demo/
 COPY pyproject.toml ./
 
 # Create non-root user and data directories

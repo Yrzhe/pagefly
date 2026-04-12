@@ -3,6 +3,9 @@ import { useNavigate } from 'react-router-dom'
 import { LayoutDashboard, FileText, BookOpen, Clock, FolderOpen, Calendar, ArrowRight, Bot } from 'lucide-react'
 import api from '@/api/client'
 import { cn } from '@/lib/utils'
+import { OnboardingWizard } from '@/components/OnboardingWizard'
+
+const ONBOARDING_DISMISSED_KEY = 'pagefly_onboarding_dismissed'
 
 interface Stats {
   documents: number
@@ -52,6 +55,7 @@ export function DashboardPage() {
   const [activity, setActivity] = useState<Activity[]>([])
   const [trends, setTrends] = useState<TrendDay[]>([])
   const [loading, setLoading] = useState(true)
+  const [showOnboarding, setShowOnboarding] = useState(false)
   const navigate = useNavigate()
 
   const fetchData = useCallback(async () => {
@@ -70,6 +74,26 @@ export function DashboardPage() {
 
   useEffect(() => { fetchData() }, [fetchData])
 
+  // Show onboarding wizard on first load if the knowledge base is empty
+  useEffect(() => {
+    if (loading || !stats) return
+    const dismissed = localStorage.getItem(ONBOARDING_DISMISSED_KEY) === '1'
+    if (!dismissed && stats.documents === 0 && stats.wiki_articles === 0) {
+      setShowOnboarding(true)
+    }
+  }, [loading, stats])
+
+  const dismissOnboarding = () => {
+    localStorage.setItem(ONBOARDING_DISMISSED_KEY, '1')
+    setShowOnboarding(false)
+  }
+
+  const handleDataLoaded = () => {
+    localStorage.setItem(ONBOARDING_DISMISSED_KEY, '1')
+    setShowOnboarding(false)
+    fetchData()
+  }
+
   if (loading) return <div className="flex items-center justify-center h-screen text-text-tertiary text-sm">Loading...</div>
 
   const categories = stats ? Object.entries(stats.categories).sort((a, b) => b[1] - a[1]) : []
@@ -83,6 +107,12 @@ export function DashboardPage() {
 
   return (
     <div className="flex flex-col h-screen overflow-y-auto">
+      {showOnboarding && (
+        <OnboardingWizard
+          onDismiss={dismissOnboarding}
+          onDataLoaded={handleDataLoaded}
+        />
+      )}
       <header className="flex items-center px-6 h-14 border-b border-border flex-shrink-0">
         <LayoutDashboard size={16} className="text-accent-primary mr-3" />
         <h1 className="font-heading text-[15px] font-bold text-text-primary">Dashboard</h1>

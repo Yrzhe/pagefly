@@ -1,0 +1,16 @@
+# Railway deployment config for PageFly.
+# See https://docs.railway.app/reference/config-as-code
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+startCommand = "python -m src.main"
+healthcheckPath = "/health"
+healthcheckTimeout = 30
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 5
+
+# Persistent volume for user data (documents, wiki, SQLite DB).
+# Configure a volume named "pagefly-data" in the Railway UI and mount at /app/data.

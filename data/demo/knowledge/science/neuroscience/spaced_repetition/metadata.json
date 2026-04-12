@@ -1,0 +1,22 @@
+{
+  "id": "demo0003-spac-edre-peti-tion0000000000",
+  "title": "Spaced Repetition and Long-Term Memory",
+  "description": "Why reviewing information at increasing intervals strengthens long-term memory, and why this matters for any knowledge-management system.",
+  "source_type": "text",
+  "original_filename": "spaced_repetition.md",
+  "ingested_at": "2026-04-10T11:20:00+00:00",
+  "classified_at": "2026-04-10T11:20:28+00:00",
+  "status": "classified",
+  "location": "knowledge/science/neuroscience/spaced_repetition",
+  "tags": ["memory", "learning", "spaced-repetition", "ebbinghaus"],
+  "category": "science",
+  "subcategory": "neuroscience",
+  "relevance_score": 8,
+  "temporal_type": "evergreen",
+  "key_claims": [
+    "Memory decays exponentially without review (Ebbinghaus forgetting curve)",
+    "Effortful recall just before forgetting is what consolidates memory",
+    "Capture without recall is just digital hoarding"
+  ],
+  "references": []
+}

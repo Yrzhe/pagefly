@@ -26,16 +26,81 @@ INBOX_DIR = DATA_DIR / "inbox"
 WORKSPACE_DIR = DATA_DIR / "workspace"
 
 
+def _default_config() -> dict:
+    """Return a minimal config scaffold when config.json is absent.
+
+    This lets users run PageFly with env vars only — no config file required
+    for a minimal deployment. Only ANTHROPIC_API_KEY, PAGEFLY_EMAIL, and
+    PAGEFLY_PASSWORD are needed to boot a working system.
+    """
+    return {
+        "api_keys": {
+            "anthropic": {"api_key": "", "base_url": "https://api.anthropic.com"},
+            "openai": {"api_key": "", "base_url": "https://api.openai.com/v1"},
+            "mistral": {"api_key": "", "base_url": "https://api.mistral.ai"},
+        },
+        "telegram": {"bot_token": "", "chat_id": ""},
+        "database": {"url": "sqlite:///data/pagefly.db"},
+        "models": {
+            "classifier": "claude-sonnet-4-6",
+            "agent": "claude-sonnet-4-6",
+            "transcription": "gpt-4o-transcribe",
+        },
+        "watcher": {"inbox_dir": "data/inbox", "parallel_limit": 3},
+        "scheduler": {
+            "daily_review": "0 22 * * *",
+            "weekly_review": "0 22 * * 0",
+            "monthly_review": "0 22 1 * *",
+            "compiler": "0 2 * * *",
+            "chat_archive": "55 23 * * *",
+        },
+        "notifications": {"telegram": True},
+        "api": {"port": 8000, "master_token": "", "max_upload_mb": 50},
+        "auth": {
+            "account": "",
+            "password_hash": "",
+            "totp_secret": "",
+            "resend_api_key": "",
+            "jwt_secret": "",
+            "jwt_expiry_hours": 24,
+        },
+        "app": {"log_level": "INFO"},
+    }
+
+
+def _apply_env_overlay(cfg: dict) -> dict:
+    """Allow env vars to fully replace config fields for minimal-config boots.
+
+    - PAGEFLY_EMAIL → auth.account
+    - PAGEFLY_PASSWORD → hashed into auth.password_hash (if not already set)
+    """
+    email = os.environ.get("PAGEFLY_EMAIL", "").strip()
+    if email:
+        cfg.setdefault("auth", {})["account"] = email
+
+    password = os.environ.get("PAGEFLY_PASSWORD", "").strip()
+    if password and not cfg.get("auth", {}).get("password_hash"):
+        try:
+            import bcrypt
+            cfg.setdefault("auth", {})["password_hash"] = bcrypt.hashpw(
+                password.encode(), bcrypt.gensalt()
+            ).decode()
+        except ImportError:
+            pass
+
+    return cfg
+
+
 def _load_config() -> dict:
-    """Load config.json. Raise if not found."""
+    """Load config.json, or fall back to defaults + env vars."""
     path = ROOT_DIR / "config.json"
-    if not path.exists():
-        raise FileNotFoundError(
-            f"config.json not found at {path}. "
-            "Copy config.json.example to config.json and fill in your keys."
-        )
-    with open(path, encoding="utf-8") as f:
-        return json.load(f)
+    if path.exists():
+        with open(path, encoding="utf-8") as f:
+            cfg = json.load(f)
+    else:
+        # No config file — rely on env vars (useful for Railway/Render deploys)
+        cfg = _default_config()
+    return _apply_env_overlay(cfg)
 
 
 _cfg = _load_config()
@@ -82,7 +147,8 @@ NOTIFY_TELEGRAM: bool = _notifications.get("telegram", False)
 
 # API
 _api = _cfg.get("api", {})
-API_PORT: int = int(_env("API_PORT", str(_api.get("port", 8000))))
+# API_PORT with fallback to PORT (Railway/Render/Heroku convention)
+API_PORT: int = int(_env("API_PORT", _env("PORT", str(_api.get("port", 8000)))))
 API_MASTER_TOKEN: str = _env("API_MASTER_TOKEN", _api.get("master_token", ""))
 API_MAX_UPLOAD_MB: int = _api.get("max_upload_mb", 50)
 
