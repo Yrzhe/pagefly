@@ -15,8 +15,10 @@ _pending: set[str] = set()  # doc_ids currently being classified
 
 # Compiler debounce: trigger once after a batch of classifications settle
 _COMPILER_DEBOUNCE_SECS = 60
+_COMPILER_COOLDOWN_SECS = 1800  # Don't re-trigger within 30 min of last run
 _compiler_timer: threading.Timer | None = None
 _compiler_lock = threading.Lock()
+_compiler_last_run: float = 0
 
 
 def schedule_classify(doc_dir: Path, doc_id: str) -> None:
@@ -90,7 +92,18 @@ def _schedule_compiler() -> None:
 
 def _trigger_compiler() -> None:
     """Actually run the compiler agent."""
+    global _compiler_last_run
     import asyncio
+    import time
+
+    # Cooldown: skip if compiler ran recently (e.g., cron already ran it)
+    now = time.time()
+    if now - _compiler_last_run < _COMPILER_COOLDOWN_SECS:
+        logger.info("Compiler skipped — last run was %ds ago (cooldown %ds)",
+                     int(now - _compiler_last_run), _COMPILER_COOLDOWN_SECS)
+        return
+
+    _compiler_last_run = now
     logger.info("Triggering compiler after new classifications...")
     try:
         from src.agents.compiler import run_compiler
