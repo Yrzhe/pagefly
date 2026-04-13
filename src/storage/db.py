@@ -90,6 +90,22 @@ CREATE TABLE IF NOT EXISTS scheduled_tasks (
     updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS task_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id TEXT,
+    task_name TEXT NOT NULL,
+    task_type TEXT NOT NULL,
+    source TEXT NOT NULL DEFAULT 'user',
+    started_at TEXT NOT NULL,
+    finished_at TEXT,
+    status TEXT NOT NULL DEFAULT 'running',
+    output TEXT DEFAULT '',
+    error TEXT DEFAULT '',
+    duration_ms INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_task_runs_task_id ON task_runs(task_id);
+CREATE INDEX IF NOT EXISTS idx_task_runs_started_at ON task_runs(started_at DESC);
+
 CREATE TABLE IF NOT EXISTS api_tokens (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
@@ -364,6 +380,87 @@ def delete_scheduled_task(task_id: str) -> None:
     conn.execute("DELETE FROM scheduled_tasks WHERE id = ?", (task_id,))
     conn.commit()
     conn.close()
+
+
+# ── Task Runs (execution history) ──
+
+def insert_task_run(
+    task_id: str | None,
+    task_name: str,
+    task_type: str,
+    source: str = "user",
+) -> int:
+    """Record the start of a task execution. Returns the run id."""
+    conn = get_connection()
+    try:
+        cur = conn.execute(
+            """INSERT INTO task_runs (task_id, task_name, task_type, source, started_at, status)
+               VALUES (?, ?, ?, ?, ?, 'running')""",
+            (task_id, task_name, task_type, source, now_iso()),
+        )
+        conn.commit()
+        return cur.lastrowid
+    finally:
+        conn.close()
+
+
+def finish_task_run(
+    run_id: int,
+    status: str,
+    output: str = "",
+    error: str = "",
+    duration_ms: int = 0,
+) -> None:
+    """Update a task run with final status and output."""
+    conn = get_connection()
+    try:
+        conn.execute(
+            """UPDATE task_runs
+               SET finished_at = ?, status = ?, output = ?, error = ?, duration_ms = ?
+               WHERE id = ?""",
+            (now_iso(), status, output, error, duration_ms, run_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def list_task_runs(task_id: str | None = None, limit: int = 20) -> list[dict]:
+    """List task runs, newest first. If task_id is None, returns recent runs across all tasks."""
+    conn = get_connection()
+    if task_id:
+        rows = conn.execute(
+            """SELECT id, task_id, task_name, task_type, source, started_at, finished_at,
+                      status, duration_ms, substr(output, 1, 300) AS output_preview,
+                      substr(error, 1, 300) AS error_preview
+               FROM task_runs
+               WHERE task_id = ?
+               ORDER BY started_at DESC
+               LIMIT ?""",
+            (task_id, limit),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            """SELECT id, task_id, task_name, task_type, source, started_at, finished_at,
+                      status, duration_ms, substr(output, 1, 300) AS output_preview,
+                      substr(error, 1, 300) AS error_preview
+               FROM task_runs
+               ORDER BY started_at DESC
+               LIMIT ?""",
+            (limit,),
+        ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_task_run(run_id: int) -> dict | None:
+    """Get a single task run with full output."""
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT * FROM task_runs WHERE id = ?", (run_id,)
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
 
 
 # ── Custom Prompts ──

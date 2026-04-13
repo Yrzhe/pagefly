@@ -572,6 +572,59 @@ async def delete_schedule_api(task_id: str):
     return {"status": "ok"}
 
 
+@app.get("/api/schedules/{task_id}/runs", dependencies=[Depends(verify_token)])
+async def list_schedule_runs(task_id: str, limit: int = Query(default=20, le=100)):
+    """List recent execution history for a scheduled task."""
+    runs = db.list_task_runs(task_id=task_id, limit=limit)
+    return {"runs": runs}
+
+
+@app.get("/api/schedule-runs/recent", dependencies=[Depends(verify_token)])
+async def list_recent_runs(limit: int = Query(default=30, le=100)):
+    """List recent execution history across all scheduled tasks (system + user)."""
+    runs = db.list_task_runs(task_id=None, limit=limit)
+    return {"runs": runs}
+
+
+@app.get("/api/schedule-runs/{run_id}", dependencies=[Depends(verify_token)])
+async def get_schedule_run(run_id: int):
+    """Get a single task run with full output."""
+    run = db.get_task_run(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    return run
+
+
+_BACKGROUND_TASKS: set[asyncio.Task] = set()
+
+
+@app.post("/api/schedules/{task_id}/run-now", dependencies=[Depends(verify_token)])
+async def run_schedule_now(task_id: str):
+    """Manually trigger a scheduled task to run immediately (in the background)."""
+    conn = db.get_connection()
+    try:
+        row = conn.execute(
+            "SELECT id, name, task_type, prompt FROM scheduled_tasks WHERE id = ?",
+            (task_id,),
+        ).fetchone()
+    finally:
+        conn.close()
+    if not row:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    task = dict(row)
+    # Fire and forget — the engine wrapper records execution to task_runs.
+    # Hold a reference so the task isn't garbage-collected mid-flight.
+    from src.scheduler.engine import _run_custom_task
+
+    t = asyncio.create_task(
+        _run_custom_task(task["id"], task["name"], task["task_type"], task["prompt"] or "")
+    )
+    _BACKGROUND_TASKS.add(t)
+    t.add_done_callback(_BACKGROUND_TASKS.discard)
+    return {"status": "ok", "message": f"Task '{task['name']}' started in background"}
+
+
 # ── Prompts ──
 
 @app.get("/api/prompts", dependencies=[Depends(verify_token)])
