@@ -12,6 +12,7 @@ import { ApiPage } from '@/pages/ApiPage'
 import { SearchPage } from '@/pages/SearchPage'
 import { SettingsPage } from '@/pages/SettingsPage'
 import { ChatPage } from '@/pages/ChatPage'
+import { SchedulesPage } from '@/pages/SchedulesPage'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuth()
@@ -112,6 +113,16 @@ export default function App() {
               <ProtectedRoute>
                 <AppLayout>
                   <ChatPage />
+                </AppLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/schedules"
+            element={
+              <ProtectedRoute>
+                <AppLayout>
+                  <SchedulesPage />
                 </AppLayout>
               </ProtectedRoute>
             }
