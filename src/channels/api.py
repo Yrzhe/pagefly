@@ -557,6 +557,10 @@ async def update_schedule_api(task_id: str, body: dict):
     if not updates:
         raise HTTPException(status_code=400, detail="No valid fields to update")
 
+    # Validate cron expression if present (same rule as POST)
+    if "cron_expr" in updates and len(str(updates["cron_expr"]).split()) != 5:
+        raise HTTPException(status_code=400, detail="Invalid cron expression (need 5 fields)")
+
     db.update_scheduled_task(task_id, **updates)
     return {"status": "ok", "updated": list(updates.keys())}
 

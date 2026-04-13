@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { Calendar, Plus, Trash2, Pencil, X, Check, Lock, Clock } from 'lucide-react'
 import api from '@/api/client'
 import { cn } from '@/lib/utils'
@@ -32,18 +32,27 @@ function describeCron(cron: string): string {
   const parts = cron.trim().split(/\s+/)
   if (parts.length !== 5) return cron
   const [m, h, dom, mon, dow] = parts
-  if (m === '0' && h !== '*' && dom === '*' && mon === '*' && dow === '*') {
+  // Skip lists/steps/ranges — return raw
+  const hasComplex = (s: string) => /[,\-/]/.test(s)
+  if (parts.some(hasComplex)) return cron
+
+  // Hourly
+  if (m === '0' && h === '*' && dom === '*' && mon === '*' && dow === '*') {
+    return 'Every hour'
+  }
+  // Daily
+  if (m === '0' && /^\d+$/.test(h) && dom === '*' && mon === '*' && dow === '*') {
     return `Daily at ${h.padStart(2, '0')}:00`
   }
-  if (m === '0' && dom === '*' && mon === '*' && dow !== '*') {
+  // Weekly
+  if (m === '0' && /^\d+$/.test(h) && dom === '*' && mon === '*' && /^\d+$/.test(dow)) {
     const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-    return `Weekly on ${days[parseInt(dow)] || dow} at ${h.padStart(2, '0')}:00`
+    const idx = parseInt(dow) % 7  // 7 → 0 (Sun)
+    return `Weekly on ${days[idx]} at ${h.padStart(2, '0')}:00`
   }
-  if (m === '0' && dom !== '*' && mon === '*' && dow === '*') {
+  // Monthly
+  if (m === '0' && /^\d+$/.test(h) && /^\d+$/.test(dom) && mon === '*' && dow === '*') {
     return `Monthly on day ${dom} at ${h.padStart(2, '0')}:00`
-  }
-  if (m === '0' && dom === '*' && mon === '*' && dow === '*' && h === '*') {
-    return 'Every hour'
   }
   return cron
 }
@@ -53,25 +62,43 @@ export function SchedulesPage() {
   const [loading, setLoading] = useState(true)
   const [editor, setEditor] = useState<Schedule | null>(null)
   const [msg, setMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
+  const [togglingId, setTogglingId] = useState<string | null>(null)
+  const [fetchError, setFetchError] = useState(false)
+  const msgTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    return () => {
+      if (msgTimerRef.current) clearTimeout(msgTimerRef.current)
+    }
+  }, [])
 
   const fetchSchedules = useCallback(async () => {
     try {
       const { data } = await api.get('/api/schedules')
       setSchedules(data.schedules || [])
-    } catch { setSchedules([]) }
-    finally { setLoading(false) }
+      setFetchError(false)
+    } catch {
+      setSchedules([])
+      setFetchError(true)
+    } finally { setLoading(false) }
   }, [])
 
   useEffect(() => { fetchSchedules() }, [fetchSchedules])
 
   const showMsg = (type: 'ok' | 'err', text: string) => {
+    if (msgTimerRef.current) clearTimeout(msgTimerRef.current)
     setMsg({ type, text })
-    setTimeout(() => setMsg(null), 3000)
+    msgTimerRef.current = setTimeout(() => setMsg(null), 3000)
   }
 
   const handleSave = async (s: Schedule) => {
     if (!s.name.trim() || !s.cron.trim()) {
       showMsg('err', 'Name and cron are required')
+      return
+    }
+    const parts = s.cron.trim().split(/\s+/)
+    if (parts.length !== 5) {
+      showMsg('err', 'Cron must have 5 fields: minute hour day month weekday')
       return
     }
     try {
@@ -100,11 +127,16 @@ export function SchedulesPage() {
   }
 
   const handleToggle = async (s: Schedule) => {
-    if (!s.id) return
+    if (!s.id || togglingId === s.id) return
+    setTogglingId(s.id)
     try {
       await api.put(`/api/schedules/${s.id}`, { enabled: !s.enabled })
       await fetchSchedules()
-    } catch { /* silent */ }
+    } catch (e: any) {
+      showMsg('err', e.response?.data?.detail || 'Toggle failed')
+    } finally {
+      setTogglingId(null)
+    }
   }
 
   const handleDelete = async (s: Schedule) => {
@@ -113,7 +145,9 @@ export function SchedulesPage() {
       await api.delete(`/api/schedules/${s.id}`)
       await fetchSchedules()
       showMsg('ok', 'Schedule deleted')
-    } catch { showMsg('err', 'Delete failed') }
+    } catch (e: any) {
+      showMsg('err', e.response?.data?.detail || 'Delete failed')
+    }
   }
 
   const systemTasks = schedules.filter(s => s.source === 'system')
@@ -144,6 +178,16 @@ export function SchedulesPage() {
       <div className="p-6 max-w-[1000px] w-full flex flex-col gap-6">
         {loading ? (
           <div className="text-xs text-text-tertiary">Loading...</div>
+        ) : fetchError ? (
+          <div className="px-4 py-3 bg-error/10 border border-error/30 rounded-[8px] flex items-center justify-between">
+            <span className="text-xs text-error">Could not load schedules. Check your connection or backend.</span>
+            <button
+              onClick={fetchSchedules}
+              className="text-[11px] font-semibold text-error hover:underline"
+            >
+              Retry
+            </button>
+          </div>
         ) : (
           <>
             {/* User schedules */}
@@ -161,6 +205,7 @@ export function SchedulesPage() {
                     <ScheduleCard
                       key={s.id}
                       schedule={s}
+                      toggling={togglingId === s.id}
                       onEdit={() => setEditor({ ...s })}
                       onDelete={() => handleDelete(s)}
                       onToggle={() => handleToggle(s)}
@@ -199,11 +244,13 @@ export function SchedulesPage() {
 
 function ScheduleCard({
   schedule,
+  toggling,
   onEdit,
   onDelete,
   onToggle,
 }: {
   schedule: Schedule
+  toggling?: boolean
   onEdit?: () => void
   onDelete?: () => void
   onToggle?: () => void
@@ -239,12 +286,14 @@ function ScheduleCard({
         <div className="flex items-center gap-1 flex-shrink-0">
           <button
             onClick={onToggle}
+            disabled={toggling}
             className={cn(
               'px-2.5 py-1 rounded-full text-[10px] font-semibold transition-colors',
-              schedule.enabled ? 'bg-success/20 text-success' : 'bg-bg-tertiary text-text-tertiary'
+              schedule.enabled ? 'bg-success/20 text-success' : 'bg-bg-tertiary text-text-tertiary',
+              toggling && 'opacity-60 cursor-wait'
             )}
           >
-            {schedule.enabled ? 'Enabled' : 'Paused'}
+            {toggling ? '...' : (schedule.enabled ? 'Enabled' : 'Paused')}
           </button>
           <button onClick={onEdit} className="p-1.5 rounded hover:bg-bg-tertiary text-text-secondary opacity-0 group-hover:opacity-100 transition-opacity">
             <Pencil size={12} />
@@ -269,14 +318,31 @@ function EditorModal({
   onSave: (s: Schedule) => void
   onChange: (patch: Partial<Schedule>) => void
 }) {
+  // ESC key closes modal
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  const titleId = 'schedule-editor-title'
+
   return (
-    <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50" onClick={onClose}>
+    <div
+      className="fixed inset-0 bg-black/30 flex items-center justify-center z-50"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={titleId}
+    >
       <div className="bg-bg-primary rounded-[12px] shadow-lg w-[560px] max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-3 border-b border-border">
-          <h3 className="font-heading text-sm font-bold text-text-primary">
+          <h3 id={titleId} className="font-heading text-sm font-bold text-text-primary">
             {schedule.id ? 'Edit Schedule' : 'New Schedule'}
           </h3>
-          <button onClick={onClose} className="p-1 hover:bg-bg-secondary rounded">
+          <button onClick={onClose} aria-label="Close schedule editor" className="p-1 hover:bg-bg-secondary rounded">
             <X size={14} className="text-text-tertiary" />
           </button>
         </div>
