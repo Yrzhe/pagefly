@@ -511,6 +511,7 @@ async def list_all_schedules():
         {"name": "Chat Archive", "cron": SCHEDULE_CHAT_ARCHIVE, "type": "archive", "source": "system"},
         {"name": "Wiki Lint", "cron": "0 3 * * 0", "type": "lint", "source": "system"},
         {"name": "Workspace Organize", "cron": "30 3 * * *", "type": "organize", "source": "system"},
+        {"name": "Activity Log", "cron": "0 8 * * *", "type": "activity_log", "source": "system"},
     ]
 
     user_tasks = db.list_scheduled_tasks()
@@ -627,6 +628,179 @@ async def run_schedule_now(task_id: str):
     _BACKGROUND_TASKS.add(t)
     t.add_done_callback(_BACKGROUND_TASKS.discard)
     return {"status": "ok", "message": f"Task '{task['name']}' started in background"}
+
+
+# ── Desktop Activity Capture (YRZ-45) ──
+
+_ACTIVITY_AUDIO_MAX_MB = 200  # one meeting ~= 30 MB; cap generously
+
+@app.post("/api/activity/audio", dependencies=[Depends(verify_token)])
+async def upload_activity_audio(
+    local_uuid: str = Query(..., min_length=8, max_length=64),
+    started_at: str = Query(..., description="ISO8601 recording start"),
+    ended_at: str = Query("", description="ISO8601 recording end"),
+    duration_s: int = Query(0, ge=0),
+    source: str = Query("mixed", pattern="^(mic|system|mixed)$"),
+    trigger_app: str = Query(""),
+    device_id: str = Query(""),
+    file: UploadFile = File(...),
+):
+    """Upload a meeting audio file. Idempotent on local_uuid.
+    Returns {id, status}. Transcription runs async; poll the status endpoint."""
+    from src.activity import save_audio_upload, process_audio_transcription
+
+    # Short-circuit if we've already ingested this local_uuid
+    existing = db.get_audio_by_local_uuid(local_uuid)
+    if existing:
+        return {"id": existing["id"], "status": existing["status"], "duplicate": True}
+
+    content = await file.read()
+    size_mb = len(content) / (1024 * 1024)
+    if size_mb > _ACTIVITY_AUDIO_MAX_MB:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Audio too large: {size_mb:.1f} MB > {_ACTIVITY_AUDIO_MAX_MB} MB limit",
+        )
+
+    filename = file.filename or ""
+    fmt = (Path(filename).suffix or ".m4a").lstrip(".").lower() or "m4a"
+    try:
+        dest, created = save_audio_upload(local_uuid, content, fmt)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    audio_id = db.insert_audio_recording(
+        local_uuid=local_uuid,
+        started_at=started_at,
+        ended_at=ended_at,
+        file_path=str(dest),
+        file_size_bytes=len(content),
+        duration_s=duration_s,
+        fmt=fmt,
+        source=source,
+        trigger_app=trigger_app,
+        device_id=device_id,
+        status="uploaded",
+    )
+
+    # Fire-and-forget transcription — only the request that actually wrote the
+    # file enqueues the work. A concurrent duplicate request finds the file
+    # already on disk (created=False) and lets the winner handle transcription.
+    if created:
+        loop = asyncio.get_running_loop()
+        t = loop.run_in_executor(None, process_audio_transcription, audio_id)
+        _BACKGROUND_TASKS.add(t)  # type: ignore[arg-type]
+        t.add_done_callback(_BACKGROUND_TASKS.discard)  # type: ignore[arg-type]
+
+    return {
+        "id": audio_id,
+        "status": "uploaded",
+        "size_bytes": len(content),
+        "duplicate": not created,
+    }
+
+
+@app.get("/api/activity/audio/{audio_id}/status", dependencies=[Depends(verify_token)])
+async def get_activity_audio_status(audio_id: int):
+    """Poll transcription status. Returns the transcript once status == 'transcribed'."""
+    row = db.get_audio_recording(audio_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Audio not found")
+    return {
+        "id": row["id"],
+        "status": row["status"],
+        "duration_s": row["duration_s"],
+        "transcript": row["transcript"] if row["status"] == "transcribed" else "",
+        "transcribed_at": row["transcribed_at"],
+        "error": row["error"],
+    }
+
+
+@app.post("/api/activity/events/batch", dependencies=[Depends(verify_token)])
+async def ingest_activity_events(body: dict):
+    """Batch-ingest screen/context events from the Mac client.
+
+    Body: {"events": [{local_uuid, started_at, ended_at, duration_s,
+                       app, window_title, url, text_excerpt, ax_role,
+                       audio_id, device_id, metadata_json}, ...]}
+
+    Idempotent on each event's local_uuid. Returns a map of
+    {local_uuid: server_id} plus the write-through jsonl path.
+    """
+    events = body.get("events") or []
+    if not isinstance(events, list):
+        raise HTTPException(status_code=400, detail="events must be a list")
+    if len(events) > 1000:
+        raise HTTPException(status_code=400, detail="batch too large (max 1000 events)")
+
+    from src.activity import is_safe_uuid
+
+    # Light validation so one bad row doesn't poison the whole batch.
+    cleaned: list[dict] = []
+    referenced_audio_ids: set[int] = set()
+    for e in events:
+        if not isinstance(e, dict):
+            continue
+        if not is_safe_uuid(e.get("local_uuid") or "") or not e.get("started_at"):
+            continue
+        # Truncate extremely long text_excerpt defensively.
+        txt = e.get("text_excerpt") or ""
+        if len(txt) > 4000:
+            e["text_excerpt"] = txt[:1024] + " …[truncated] " + txt[-200:]
+        aid = e.get("audio_id")
+        if aid is not None:
+            try:
+                e["audio_id"] = int(aid)
+                referenced_audio_ids.add(e["audio_id"])
+            except (TypeError, ValueError):
+                e["audio_id"] = None
+        cleaned.append(e)
+
+    if not cleaned:
+        return {"inserted": {}, "skipped": len(events)}
+
+    # Guard the FK: drop audio_id references that don't resolve yet. The client's
+    # upload protocol puts audio before events, but a crashed/retried batch can
+    # still race — failing the whole batch with a FK violation would be worse.
+    if referenced_audio_ids:
+        conn = db.get_connection()
+        try:
+            placeholders = ",".join(["?"] * len(referenced_audio_ids))
+            rows = conn.execute(
+                f"SELECT id FROM audio_recordings WHERE id IN ({placeholders})",
+                list(referenced_audio_ids),
+            ).fetchall()
+        finally:
+            conn.close()
+        valid = {int(r["id"]) for r in rows}
+        missing = referenced_audio_ids - valid
+        if missing:
+            logger.warning("Batch referenced unknown audio_ids: %s — dropped to NULL", missing)
+            for e in cleaned:
+                if e.get("audio_id") in missing:
+                    e["audio_id"] = None
+
+    uuid_to_id = db.insert_activity_events_batch(cleaned)
+
+    # Append-only canonical log, grouped by date inside the helper.
+    from src.activity import append_events_to_jsonl
+
+    for e in cleaned:
+        e["server_id"] = uuid_to_id.get(e["local_uuid"])
+    append_events_to_jsonl(cleaned)
+
+    return {"inserted": uuid_to_id, "skipped": len(events) - len(cleaned)}
+
+
+@app.get("/api/activity/events", dependencies=[Depends(verify_token)])
+async def list_activity_events_api(
+    start: str | None = None,
+    end: str | None = None,
+    limit: int = Query(default=200, le=1000),
+):
+    """Retrieve recorded activity events in [start, end). ISO8601 strings."""
+    rows = db.list_activity_events(start=start, end=end, limit=limit)
+    return {"events": rows, "count": len(rows)}
 
 
 # ── Prompts ──

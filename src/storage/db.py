@@ -129,6 +129,49 @@ CREATE TABLE IF NOT EXISTS chat_sessions (
     messages_json TEXT NOT NULL DEFAULT '[]',
     updated_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS audio_recordings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    local_uuid TEXT UNIQUE,
+    device_id TEXT DEFAULT '',
+    started_at TEXT NOT NULL,
+    ended_at TEXT DEFAULT '',
+    duration_s INTEGER DEFAULT 0,
+    file_path TEXT NOT NULL,
+    file_size_bytes INTEGER DEFAULT 0,
+    format TEXT DEFAULT 'm4a',
+    source TEXT DEFAULT 'mixed',
+    trigger_app TEXT DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'uploaded',
+    transcript TEXT DEFAULT '',
+    transcript_path TEXT DEFAULT '',
+    transcribed_at TEXT DEFAULT '',
+    error TEXT DEFAULT '',
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_audio_local_uuid ON audio_recordings(local_uuid);
+CREATE INDEX IF NOT EXISTS idx_audio_started_at ON audio_recordings(started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audio_status ON audio_recordings(status);
+
+CREATE TABLE IF NOT EXISTS activity_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    local_uuid TEXT UNIQUE,
+    device_id TEXT DEFAULT '',
+    started_at TEXT NOT NULL,
+    ended_at TEXT DEFAULT '',
+    duration_s INTEGER DEFAULT 0,
+    app TEXT DEFAULT '',
+    window_title TEXT DEFAULT '',
+    url TEXT DEFAULT '',
+    text_excerpt TEXT DEFAULT '',
+    ax_role TEXT DEFAULT '',
+    audio_id INTEGER REFERENCES audio_recordings(id) ON DELETE SET NULL,
+    metadata_json TEXT DEFAULT '{}',
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_activity_local_uuid ON activity_events(local_uuid);
+CREATE INDEX IF NOT EXISTS idx_activity_started_at ON activity_events(started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_activity_audio_id ON activity_events(audio_id);
 """
 
 
@@ -595,3 +638,227 @@ def delete_session(chat_id: int) -> None:
     conn.execute("DELETE FROM chat_sessions WHERE chat_id = ?", (chat_id,))
     conn.commit()
     conn.close()
+
+
+# ── Desktop Activity (YRZ-45) ──
+
+def insert_audio_recording(
+    local_uuid: str,
+    started_at: str,
+    ended_at: str,
+    file_path: str,
+    file_size_bytes: int = 0,
+    duration_s: int = 0,
+    fmt: str = "m4a",
+    source: str = "mixed",
+    trigger_app: str = "",
+    device_id: str = "",
+    status: str = "uploaded",
+) -> int:
+    """Idempotent insert keyed by local_uuid. Returns the server-side id."""
+    ts = now_iso()
+    conn = get_connection()
+    try:
+        conn.execute(
+            """INSERT INTO audio_recordings
+               (local_uuid, device_id, started_at, ended_at, duration_s,
+                file_path, file_size_bytes, format, source, trigger_app,
+                status, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(local_uuid) DO NOTHING""",
+            (local_uuid, device_id, started_at, ended_at, duration_s,
+             file_path, file_size_bytes, fmt, source, trigger_app,
+             status, ts),
+        )
+        conn.commit()
+        row = conn.execute(
+            "SELECT id FROM audio_recordings WHERE local_uuid = ?", (local_uuid,)
+        ).fetchone()
+        return int(row["id"])
+    finally:
+        conn.close()
+
+
+def get_audio_recording(audio_id: int) -> dict | None:
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT * FROM audio_recordings WHERE id = ?", (audio_id,)
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def get_audio_by_local_uuid(local_uuid: str) -> dict | None:
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT * FROM audio_recordings WHERE local_uuid = ?", (local_uuid,)
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def update_audio_transcript(
+    audio_id: int,
+    transcript: str,
+    transcript_path: str = "",
+    status: str = "transcribed",
+    error: str = "",
+) -> None:
+    """Called by the STT worker once transcription finishes (or fails)."""
+    conn = get_connection()
+    try:
+        conn.execute(
+            """UPDATE audio_recordings
+               SET transcript = ?, transcript_path = ?, status = ?,
+                   transcribed_at = ?, error = ?
+               WHERE id = ?""",
+            (transcript, transcript_path, status, now_iso(), error, audio_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def set_audio_status(audio_id: int, status: str, error: str = "") -> None:
+    conn = get_connection()
+    try:
+        conn.execute(
+            "UPDATE audio_recordings SET status = ?, error = ? WHERE id = ?",
+            (status, error, audio_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def insert_activity_event(event: dict) -> int:
+    """Idempotent insert of a single activity event, keyed by local_uuid.
+    Returns the server-side row id."""
+    ts = now_iso()
+    conn = get_connection()
+    try:
+        conn.execute(
+            """INSERT INTO activity_events
+               (local_uuid, device_id, started_at, ended_at, duration_s,
+                app, window_title, url, text_excerpt, ax_role,
+                audio_id, metadata_json, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(local_uuid) DO NOTHING""",
+            (
+                event["local_uuid"],
+                event.get("device_id", ""),
+                event["started_at"],
+                event.get("ended_at", ""),
+                int(event.get("duration_s", 0) or 0),
+                event.get("app", ""),
+                event.get("window_title", ""),
+                event.get("url", ""),
+                event.get("text_excerpt", ""),
+                event.get("ax_role", ""),
+                event.get("audio_id"),
+                event.get("metadata_json", "{}"),
+                ts,
+            ),
+        )
+        conn.commit()
+        row = conn.execute(
+            "SELECT id FROM activity_events WHERE local_uuid = ?",
+            (event["local_uuid"],),
+        ).fetchone()
+        return int(row["id"])
+    finally:
+        conn.close()
+
+
+def insert_activity_events_batch(events: list[dict]) -> dict[str, int]:
+    """Bulk idempotent insert. Returns {local_uuid: server_id} for every row."""
+    if not events:
+        return {}
+    ts = now_iso()
+    conn = get_connection()
+    try:
+        conn.executemany(
+            """INSERT INTO activity_events
+               (local_uuid, device_id, started_at, ended_at, duration_s,
+                app, window_title, url, text_excerpt, ax_role,
+                audio_id, metadata_json, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(local_uuid) DO NOTHING""",
+            [
+                (
+                    e["local_uuid"],
+                    e.get("device_id", ""),
+                    e["started_at"],
+                    e.get("ended_at", ""),
+                    int(e.get("duration_s", 0) or 0),
+                    e.get("app", ""),
+                    e.get("window_title", ""),
+                    e.get("url", ""),
+                    e.get("text_excerpt", ""),
+                    e.get("ax_role", ""),
+                    e.get("audio_id"),
+                    e.get("metadata_json", "{}"),
+                    ts,
+                )
+                for e in events
+            ],
+        )
+        conn.commit()
+        placeholders = ",".join(["?"] * len(events))
+        rows = conn.execute(
+            f"SELECT local_uuid, id FROM activity_events WHERE local_uuid IN ({placeholders})",
+            [e["local_uuid"] for e in events],
+        ).fetchall()
+        return {r["local_uuid"]: int(r["id"]) for r in rows}
+    finally:
+        conn.close()
+
+
+def list_activity_events(
+    start: str | None = None,
+    end: str | None = None,
+    limit: int = 500,
+) -> list[dict]:
+    """List activity events in [start, end), newest first."""
+    conn = get_connection()
+    try:
+        clauses: list[str] = []
+        params: list = []
+        if start:
+            clauses.append("started_at >= ?")
+            params.append(start)
+        if end:
+            clauses.append("started_at < ?")
+            params.append(end)
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        params.append(int(limit))
+        rows = conn.execute(
+            f"""SELECT * FROM activity_events
+                {where}
+                ORDER BY started_at DESC
+                LIMIT ?""",
+            params,
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def list_pending_transcriptions(limit: int = 10) -> list[dict]:
+    """Audio rows waiting for (or retrying) transcription."""
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            """SELECT * FROM audio_recordings
+               WHERE status IN ('uploaded', 'transcribing')
+               ORDER BY created_at ASC
+               LIMIT ?""",
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()

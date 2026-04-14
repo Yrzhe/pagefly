@@ -172,6 +172,19 @@ async def _catchup_chat_archive() -> None:
         logger.info("Archive for %s already exists, no catch-up needed", yesterday)
 
 
+async def _run_activity_log() -> None:
+    """Scheduled task: summarize yesterday's desktop activity into a wiki article."""
+    logger.info("Scheduled activity_log starting...")
+    try:
+        from src.agents.activity_log import run_activity_log
+        result = await run_activity_log()
+        preview = (result or "")[:200].replace("\n", " ")
+        await notify(f"Work log generated.\n\n{preview}")
+    except Exception as e:
+        logger.error("Activity log failed: %s", e)
+        await notify(f"Activity log failed: {e}")
+
+
 async def _run_workspace_organize() -> None:
     """Scheduled task: LLM-powered workspace triage."""
     logger.info("Scheduled workspace organize starting...")
@@ -438,6 +451,13 @@ async def start_scheduler() -> None:
         _run_workspace_organize,
         trigger=CronTrigger(hour=3, minute=30),
         id="workspace_organize", name="Workspace Organize",
+    )
+
+    # Activity log (daily at 8:00am — summarize yesterday's desktop capture)
+    scheduler.add_job(
+        _run_activity_log,
+        trigger=CronTrigger(hour=8, minute=0),
+        id="activity_log", name="Activity Log",
     )
 
     # Load user-defined tasks from database
