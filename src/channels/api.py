@@ -500,6 +500,7 @@ async def list_all_schedules():
     from src.shared.config import (
         SCHEDULE_DAILY_REVIEW, SCHEDULE_WEEKLY_REVIEW,
         SCHEDULE_MONTHLY_REVIEW, SCHEDULE_COMPILER,
+        SCHEDULE_CHAT_ARCHIVE,
     )
 
     system = [
@@ -507,6 +508,9 @@ async def list_all_schedules():
         {"name": "Weekly Review", "cron": SCHEDULE_WEEKLY_REVIEW, "type": "review", "source": "system"},
         {"name": "Monthly Review", "cron": SCHEDULE_MONTHLY_REVIEW, "type": "review", "source": "system"},
         {"name": "Compiler", "cron": SCHEDULE_COMPILER, "type": "compiler", "source": "system"},
+        {"name": "Chat Archive", "cron": SCHEDULE_CHAT_ARCHIVE, "type": "archive", "source": "system"},
+        {"name": "Wiki Lint", "cron": "0 3 * * 0", "type": "lint", "source": "system"},
+        {"name": "Workspace Organize", "cron": "30 3 * * *", "type": "organize", "source": "system"},
     ]
 
     user_tasks = db.list_scheduled_tasks()
