@@ -1,0 +1,59 @@
+# PageFly Capture — XcodeGen spec.
+# Run `xcodegen` from this directory to regenerate PageflyCapture.xcodeproj.
+# The generated project is gitignored; this YAML is the canonical source.
+
+name: PageflyCapture
+options:
+  bundleIdPrefix: top.yrzhe
+  deploymentTarget:
+    macOS: "13.0"
+  developmentLanguage: en
+  generateEmptyDirectories: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    MACOSX_DEPLOYMENT_TARGET: "13.0"
+    ENABLE_HARDENED_RUNTIME: YES
+    CODE_SIGN_IDENTITY: "-"
+    CODE_SIGN_STYLE: Automatic
+    DEAD_CODE_STRIPPING: YES
+
+targets:
+  PageflyCapture:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources
+    resources:
+      - path: Resources
+    info:
+      path: Resources/Info.plist
+      properties:
+        CFBundleName: PageFly Capture
+        CFBundleDisplayName: PageFly Capture
+        CFBundleIdentifier: top.yrzhe.PageflyCapture
+        CFBundleShortVersionString: "0.0.1"
+        CFBundleVersion: "1"
+        LSMinimumSystemVersion: "13.0"
+        LSUIElement: true  # Menu bar only — no Dock icon, no main window on launch.
+        NSAccessibilityUsageDescription: >
+          PageFly Capture reads the focused app, window title, and visible text
+          via macOS Accessibility to build your personal work log. Password
+          fields are always skipped.
+        NSMicrophoneUsageDescription: >
+          PageFly Capture uses your microphone only when you start a recording,
+          to capture your voice during meetings for later transcription on your
+          server.
+        NSScreenCaptureUsageDescription: >
+          PageFly Capture taps system audio via ScreenCaptureKit only when you
+          start a recording, to include the other side of your meetings in the
+          transcription. No screenshots are taken.
+
+    entitlements:
+      path: Resources/PageflyCapture.entitlements
+      properties:
+        com.apple.security.app-sandbox: false
+        com.apple.security.network.client: true
+        com.apple.security.device.microphone: true
+        com.apple.security.device.audio-input: true

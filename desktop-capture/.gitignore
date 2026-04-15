@@ -1,0 +1,34 @@
+# Xcode
+PageflyCapture.xcodeproj/        # Regenerate via `xcodegen` — project.yml is the source of truth
+xcuserdata/
+DerivedData/
+build/
+.build/
+*.xcworkspace
+!default.xcworkspace
+*.xcuserstate
+*.xcscmblueprint
+*.xccheckout
+
+# Swift Package Manager (if used alongside)
+.swiftpm/
+Package.resolved
+
+# Signing / provisioning — never commit
+*.p12
+*.mobileprovision
+*.provisionprofile
+*.cer
+*.certSigningRequest
+
+# Local overrides
+*.local.*
+.env
+.env.*
+
+# macOS
+.DS_Store
+
+# Logs / traces
+*.log
+*.trace

@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<key>CFBundleDisplayName</key>
+	<string>PageFly Capture</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>top.yrzhe.PageflyCapture</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>PageFly Capture</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.0.1</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>13.0</string>
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSAccessibilityUsageDescription</key>
+	<string>PageFly Capture reads the focused app, window title, and visible text via macOS Accessibility to build your personal work log. Password fields are always skipped.
+</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>PageFly Capture uses your microphone only when you start a recording, to capture your voice during meetings for later transcription on your server.
+</string>
+	<key>NSScreenCaptureUsageDescription</key>
+	<string>PageFly Capture taps system audio via ScreenCaptureKit only when you start a recording, to include the other side of your meetings in the transcription. No screenshots are taken.
+</string>
+</dict>
+</plist>

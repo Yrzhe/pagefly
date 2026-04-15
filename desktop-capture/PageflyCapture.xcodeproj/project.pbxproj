@@ -1,0 +1,355 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		027FA2668F4C6AA5CF8B8384 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA10410C05EAC9790314F21C /* AppDelegate.swift */; };
+		578F3ECBAFDD6B5425651C84 /* MenuBarController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38D49E70C88E8893B0429B72 /* MenuBarController.swift */; };
+		80BE245B329E24AD1A7246B9 /* MenuPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3707D6B3D2CD67B272D679A8 /* MenuPanelView.swift */; };
+		86B55810AD8F139AA8BEA816 /* PreferencesWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB60704D3C5A293759707ADF /* PreferencesWindow.swift */; };
+		E9AF2A564C6DD08B1993CAC3 /* PageflyCaptureApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3198473E7339F854335DE05B /* PageflyCaptureApp.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		3198473E7339F854335DE05B /* PageflyCaptureApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PageflyCaptureApp.swift; sourceTree = "<group>"; };
+		3707D6B3D2CD67B272D679A8 /* MenuPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuPanelView.swift; sourceTree = "<group>"; };
+		38D49E70C88E8893B0429B72 /* MenuBarController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarController.swift; sourceTree = "<group>"; };
+		996EB3AF1CCA5A676AC9C737 /* PageflyCapture.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PageflyCapture.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		CB60704D3C5A293759707ADF /* PreferencesWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreferencesWindow.swift; sourceTree = "<group>"; };
+		EA10410C05EAC9790314F21C /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		0FF74C77281B674347DD40C0 /* Sync */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			path = Sync;
+			sourceTree = "<group>";
+		};
+		7F91A6F825A3194E71473256 /* Audio */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			path = Audio;
+			sourceTree = "<group>";
+		};
+		808EEB2DE7FD25E18DE0C508 /* Capture */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			path = Capture;
+			sourceTree = "<group>";
+		};
+		8FCC0E844E57F6EDB769C0E9 /* Storage */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			path = Storage;
+			sourceTree = "<group>";
+		};
+		990CC7D57A8D233C86162EE8 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				996EB3AF1CCA5A676AC9C737 /* PageflyCapture.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		B251A4A6F2320050BC3066F5 /* Utils */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			path = Utils;
+			sourceTree = "<group>";
+		};
+		E4D0E4D7799D56527AB89544 = {
+			isa = PBXGroup;
+			children = (
+				F9CA163F12560CA030035032 /* Sources */,
+				990CC7D57A8D233C86162EE8 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		F9182C936557A5A3DCBAFAAF /* App */ = {
+			isa = PBXGroup;
+			children = (
+				EA10410C05EAC9790314F21C /* AppDelegate.swift */,
+				38D49E70C88E8893B0429B72 /* MenuBarController.swift */,
+				3707D6B3D2CD67B272D679A8 /* MenuPanelView.swift */,
+				3198473E7339F854335DE05B /* PageflyCaptureApp.swift */,
+				CB60704D3C5A293759707ADF /* PreferencesWindow.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		F9CA163F12560CA030035032 /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				F9182C936557A5A3DCBAFAAF /* App */,
+				7F91A6F825A3194E71473256 /* Audio */,
+				808EEB2DE7FD25E18DE0C508 /* Capture */,
+				8FCC0E844E57F6EDB769C0E9 /* Storage */,
+				0FF74C77281B674347DD40C0 /* Sync */,
+				B251A4A6F2320050BC3066F5 /* Utils */,
+			);
+			path = Sources;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		39A35D94C9D7BE00EF24DC72 /* PageflyCapture */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 373E6B07D1D5078F7B4BF2FF /* Build configuration list for PBXNativeTarget "PageflyCapture" */;
+			buildPhases = (
+				196D54BA854DDC1FAFBB6D74 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = PageflyCapture;
+			packageProductDependencies = (
+			);
+			productName = PageflyCapture;
+			productReference = 996EB3AF1CCA5A676AC9C737 /* PageflyCapture.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		46D75FF564D1FDA7FCC4E307 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					39A35D94C9D7BE00EF24DC72 = {
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = 44535A3547296C6656E1EEA6 /* Build configuration list for PBXProject "PageflyCapture" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = E4D0E4D7799D56527AB89544;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 990CC7D57A8D233C86162EE8 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				39A35D94C9D7BE00EF24DC72 /* PageflyCapture */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		196D54BA854DDC1FAFBB6D74 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				027FA2668F4C6AA5CF8B8384 /* AppDelegate.swift in Sources */,
+				578F3ECBAFDD6B5425651C84 /* MenuBarController.swift in Sources */,
+				80BE245B329E24AD1A7246B9 /* MenuPanelView.swift in Sources */,
+				E9AF2A564C6DD08B1993CAC3 /* PageflyCaptureApp.swift in Sources */,
+				86B55810AD8F139AA8BEA816 /* PreferencesWindow.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		4D6DFF3F3AF4D9085BCFC157 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				DEAD_CODE_STRIPPING = YES;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.9;
+			};
+			name = Release;
+		};
+		5DCD8B8E43437C4036951566 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				DEAD_CODE_STRIPPING = YES;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.9;
+			};
+			name = Debug;
+		};
+		A0340E53393E5398BA3C9B1F /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Resources/PageflyCapture.entitlements;
+				COMBINE_HIDPI_IMAGES = YES;
+				INFOPLIST_FILE = Resources/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = top.yrzhe.PageflyCapture;
+				SDKROOT = macosx;
+			};
+			name = Debug;
+		};
+		B584BCA4A614EA86421B648C /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Resources/PageflyCapture.entitlements;
+				COMBINE_HIDPI_IMAGES = YES;
+				INFOPLIST_FILE = Resources/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = top.yrzhe.PageflyCapture;
+				SDKROOT = macosx;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		373E6B07D1D5078F7B4BF2FF /* Build configuration list for PBXNativeTarget "PageflyCapture" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A0340E53393E5398BA3C9B1F /* Debug */,
+				B584BCA4A614EA86421B648C /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		44535A3547296C6656E1EEA6 /* Build configuration list for PBXProject "PageflyCapture" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				5DCD8B8E43437C4036951566 /* Debug */,
+				4D6DFF3F3AF4D9085BCFC157 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 46D75FF564D1FDA7FCC4E307 /* Project object */;
+}
