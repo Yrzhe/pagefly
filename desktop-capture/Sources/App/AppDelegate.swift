@@ -10,6 +10,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             onQuit: { NSApp.terminate(nil) }
         )
         self.menuBar = menuBar
+
+        // If a token is already in Keychain from a previous launch, ping the
+        // server so the icon ends up coloured before the user clicks anywhere.
+        if SettingsStore.shared.hasToken {
+            Task { await SettingsStore.shared.ping() }
+        }
     }
 
     private func openPreferences() {

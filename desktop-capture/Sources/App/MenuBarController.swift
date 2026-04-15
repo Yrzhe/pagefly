@@ -1,13 +1,16 @@
 import AppKit
+import Combine
 import SwiftUI
 
 /// Owns the NSStatusItem in the menu bar and the popover that hosts the
-/// SwiftUI dropdown panel. For M1 the panel is a placeholder; later milestones
-/// will swap in the full armed/paused/recording panels from the design canvas.
+/// SwiftUI dropdown panel. Listens to SettingsStore so the icon tint reflects
+/// the current connection state without polling.
+@MainActor
 final class MenuBarController: NSObject {
     private let statusItem: NSStatusItem
     private let popover: NSPopover
     private var eventMonitor: Any?
+    private var cancellables = Set<AnyCancellable>()
 
     private let onOpenPreferences: () -> Void
     private let onQuit: () -> Void
@@ -28,6 +31,7 @@ final class MenuBarController: NSObject {
 
         configureStatusItem()
         configurePopover()
+        observeSettings()
     }
 
     deinit {
@@ -40,13 +44,13 @@ final class MenuBarController: NSObject {
 
     private func configureStatusItem() {
         if let button = statusItem.button {
-            // SF Symbol placeholder — swap for a bespoke PageFly mark later.
             let image = NSImage(systemSymbolName: "circle.fill", accessibilityDescription: "PageFly Capture")
             image?.isTemplate = true
             button.image = image
             button.imagePosition = .imageOnly
             button.target = self
             button.action = #selector(togglePopover(_:))
+            applyTint(for: SettingsStore.shared.connectionState)
         }
     }
 
@@ -59,11 +63,40 @@ final class MenuBarController: NSObject {
             onQuit: { [weak self] in
                 self?.closePopover()
                 self?.onQuit()
+            },
+            onTest: {
+                Task { await SettingsStore.shared.ping() }
             }
         )
         let hosting = NSHostingController(rootView: view)
-        hosting.view.frame = NSRect(x: 0, y: 0, width: 360, height: 420)
+        hosting.view.frame = NSRect(x: 0, y: 0, width: 360, height: 220)
         popover.contentViewController = hosting
+    }
+
+    private func observeSettings() {
+        SettingsStore.shared.$connectionState
+            .receive(on: RunLoop.main)
+            .sink { [weak self] state in
+                self?.applyTint(for: state)
+            }
+            .store(in: &cancellables)
+    }
+
+    /// Tint the template status icon based on the current state. Template
+    /// images recolour against any background, so this works in both light
+    /// and dark menu bars.
+    private func applyTint(for state: ConnectionState) {
+        guard let button = statusItem.button else { return }
+        switch state {
+        case .connected:
+            button.contentTintColor = .systemGreen
+        case .checking:
+            button.contentTintColor = .secondaryLabelColor
+        case .unauthorized, .unreachable:
+            button.contentTintColor = .systemRed
+        case .unknown:
+            button.contentTintColor = .tertiaryLabelColor
+        }
     }
 
     // MARK: - Popover handling
@@ -87,8 +120,6 @@ final class MenuBarController: NSObject {
         stopMonitoringOutsideClicks()
     }
 
-    // Close popover on any click outside it — NSPopover's .transient should
-    // already do this, but keep a manual monitor as insurance.
     private func startMonitoringOutsideClicks() {
         eventMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
             self?.closePopover()
