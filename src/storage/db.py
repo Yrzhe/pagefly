@@ -640,7 +640,7 @@ def delete_session(chat_id: int) -> None:
     conn.close()
 
 
-# ── Desktop Activity (YRZ-45) ──
+# ── Desktop Activity ──
 
 def insert_audio_recording(
     local_uuid: str,

@@ -1,4 +1,4 @@
-"""Desktop activity capture (YRZ-45) — storage + transcription helpers.
+"""Desktop activity capture — storage + transcription helpers.
 
 Two kinds of rows land here:
   - `audio_recordings`   : meeting recordings uploaded from Mac client,

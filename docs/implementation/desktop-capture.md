@@ -1,9 +1,8 @@
-# Desktop Capture Client — Implementation Plan (YRZ-45)
+# Desktop Capture Client — Implementation Plan
 
 > Companion to the design doc in `docs/desktop-auto-capture.md`.
 > Design decisions live there; this doc is just the execution sequence.
 
-**Parent issue:** YRZ-45 — Desktop app: auto-capture browser activity as work log
 **Status:** Phase 1 (server side) complete · Phase 2 (Mac client) starting
 
 ## Goal
@@ -182,7 +181,7 @@ anyone non-developer uses the app.
   sleep/wake, offline → online, permission revoke, blocklist app focus,
   private browsing, multi-screen
 
-## Acceptance criteria for closing YRZ-45
+## Acceptance criteria for Phase 2
 
 - [ ] Notarized `.dmg` downloadable from GitHub Releases
 - [ ] Fresh Mac can install, grant 3 permissions, see "green dot" in < 2 min
@@ -218,5 +217,5 @@ anyone non-developer uses the app.
 
 ## Milestone tracking
 
-Each milestone becomes a Linear sub-issue of YRZ-45; close them as they ship.
-The parent YRZ-45 closes only when the acceptance criteria above are all met.
+Milestones are tracked on the internal roadmap; close them as they ship.
+Phase 2 is considered done only when the acceptance criteria above are all met.

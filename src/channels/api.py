@@ -630,7 +630,7 @@ async def run_schedule_now(task_id: str):
     return {"status": "ok", "message": f"Task '{task['name']}' started in background"}
 
 
-# ── Desktop Activity Capture (YRZ-45) ──
+# ── Desktop Activity Capture ──
 
 _ACTIVITY_AUDIO_MAX_MB = 200  # one meeting ~= 30 MB; cap generously
 

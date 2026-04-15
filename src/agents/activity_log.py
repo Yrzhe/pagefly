@@ -1,4 +1,4 @@
-"""Activity Log Agent (YRZ-45) — summarizes a day of desktop capture into a wiki article.
+"""Activity Log Agent — summarizes a day of desktop capture into a wiki article.
 
 Reads `activity_events` + joined `audio_recordings` transcripts for the target
 day, injects them into a focused prompt, and delegates writing to the review

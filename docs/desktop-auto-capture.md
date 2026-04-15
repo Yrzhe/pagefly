@@ -1,4 +1,4 @@
-# Desktop Auto-Capture (YRZ-45)
+# Desktop Auto-Capture
 
 > Status: design notes. Server side is being built first; Mac client comes after.
 
