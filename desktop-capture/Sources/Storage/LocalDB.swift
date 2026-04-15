@@ -69,6 +69,30 @@ final class LocalDB {
                           columns: ["context_hash"])
         }
 
+        m.registerMigration("v2_create_local_audio") { db in
+            try db.create(table: LocalAudio.databaseTableName) { t in
+                t.column("local_uuid", .text).notNull().primaryKey()
+                t.column("started_at", .text).notNull()
+                t.column("ended_at", .text)
+                t.column("duration_s", .integer).notNull().defaults(to: 0)
+                t.column("file_path", .text).notNull().defaults(to: "")
+                t.column("file_size_bytes", .integer).notNull().defaults(to: 0)
+                t.column("format", .text).notNull().defaults(to: "m4a")
+                t.column("source", .text).notNull().defaults(to: "mic")
+                t.column("trigger_app", .text).notNull().defaults(to: "")
+                t.column("status", .text).notNull().defaults(to: "pending_upload")
+                t.column("remote_id", .integer)
+                t.column("transcript", .text)
+                t.column("created_at", .text).notNull()
+            }
+            try db.create(index: "idx_local_audio_status",
+                          on: LocalAudio.databaseTableName,
+                          columns: ["status"])
+            try db.create(index: "idx_local_audio_started",
+                          on: LocalAudio.databaseTableName,
+                          columns: ["started_at"])
+        }
+
         return m
     }
 
@@ -195,6 +219,32 @@ final class LocalDB {
                 )
                 """, arguments: [overflow])
             return overflow
+        }
+    }
+
+    // MARK: - Audio helpers (M5+)
+
+    func insertAudio(_ audio: LocalAudio) throws {
+        try dbQueue.write { db in
+            var copy = audio
+            try copy.insert(db)
+        }
+    }
+
+    func pendingAudioCount() throws -> Int {
+        try dbQueue.read { db in
+            try Int.fetchOne(db, sql:
+                "SELECT COUNT(*) FROM local_audio WHERE status = 'pending_upload'"
+            ) ?? 0
+        }
+    }
+
+    func audioExists(uuid: String) throws -> Bool {
+        try dbQueue.read { db in
+            try Int.fetchOne(db, sql:
+                "SELECT 1 FROM local_audio WHERE local_uuid = ? LIMIT 1",
+                arguments: [uuid]
+            ) != nil
         }
     }
 }

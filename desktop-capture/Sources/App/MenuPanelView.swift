@@ -8,6 +8,7 @@ struct MenuPanelView: View {
     let onTest: () -> Void
 
     @ObservedObject private var settings = SettingsStore.shared
+    @ObservedObject private var recorder = AudioRecorder.shared
     @State private var pendingCount: Int = 0
     @State private var axTrusted: Bool = AXReader.isAccessibilityTrusted(prompt: false)
 
@@ -90,6 +91,7 @@ struct MenuPanelView: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 8) {
+                recordButton
                 if settings.hasToken {
                     Button("Test connection", action: onTest)
                         .buttonStyle(.bordered)
@@ -101,9 +103,33 @@ struct MenuPanelView: View {
                     .controlSize(.small)
                 Spacer()
             }
+            if let err = recorder.lastError {
+                Label(err, systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.red)
+                    .font(.system(size: 11))
+                    .padding(.top, 2)
+            }
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 14)
+    }
+
+    @ViewBuilder
+    private var recordButton: some View {
+        if recorder.isRecording {
+            Button(action: { _ = recorder.stop() }) {
+                Label("Stop recording", systemImage: "stop.circle.fill")
+                    .foregroundStyle(.red)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+        } else {
+            Button(action: { _ = recorder.start() }) {
+                Label("Record", systemImage: "mic.fill")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+        }
     }
 
     private var footer: some View {
