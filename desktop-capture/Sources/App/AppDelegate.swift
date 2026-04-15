@@ -23,15 +23,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { await SettingsStore.shared.ping() }
         }
 
-        // Boot the capture pipeline whenever a token exists. Stop it when the
-        // token is forgotten. AX permission is checked inside start().
+        // Boot capture + uploader whenever a token exists. Stop them when
+        // the token is forgotten. AX permission is checked inside start().
         SettingsStore.shared.$hasToken
             .receive(on: RunLoop.main)
             .sink { hasToken in
                 if hasToken {
                     CapturePipeline.shared.start()
+                    Uploader.shared.start()
                 } else {
                     CapturePipeline.shared.stop(reason: "token cleared")
+                    Uploader.shared.stop(reason: "token cleared")
                 }
             }
             .store(in: &cancellables)
@@ -39,6 +41,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         CapturePipeline.shared.stop(reason: "app terminating")
+        Uploader.shared.stop(reason: "app terminating")
         // Belt and suspenders: close any in-flight rows directly in the DB.
         let iso = ISO8601DateFormatter().string(from: Date())
         try? LocalDB.shared.closeOpenRows(at: iso)

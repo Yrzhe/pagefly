@@ -156,7 +156,8 @@ struct MenuPanelView: View {
         }
         switch settings.connectionState {
         case .connected:
-            return "Capture is live. \(pendingCount) event\(pendingCount == 1 ? "" : "s") queued for sync."
+            let queued = "\(pendingCount) event\(pendingCount == 1 ? "" : "s") queued"
+            return "Capture is live. \(queued). \(lastSyncedLabel())"
         case .checking:
             return "Pinging \(settings.serverURL)…"
         case .unauthorized:
@@ -166,6 +167,15 @@ struct MenuPanelView: View {
         case .unknown:
             return "Click Test connection to verify your token + server URL."
         }
+    }
+
+    private func lastSyncedLabel() -> String {
+        guard let when = settings.lastSyncedAt else { return "Not synced yet." }
+        let seconds = Int(Date().timeIntervalSince(when))
+        if seconds < 60 { return "Synced just now." }
+        if seconds < 3600 { return "Synced \(seconds / 60)m ago." }
+        if seconds < 86400 { return "Synced \(seconds / 3600)h ago." }
+        return "Synced \(seconds / 86400)d ago."
     }
 
     private func refresh() {

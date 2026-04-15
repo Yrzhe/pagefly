@@ -27,6 +27,7 @@ struct LocalEvent: Codable, FetchableRecord, MutablePersistableRecord {
 /// Lifecycle states, kept as raw strings in the DB to avoid schema migrations
 /// every time we add one.
 enum LocalEventStatus: String {
-    case pending
-    case uploaded
+    case pending    // waiting for upload
+    case uploaded   // accepted by server, remote_id set
+    case failed     // server rejected or permanent decode error — stops retrying
 }

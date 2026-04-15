@@ -113,4 +113,88 @@ final class LocalDB {
             ) ?? 0
         }
     }
+
+    // MARK: - Uploader helpers
+
+    /// Fetch the oldest pending rows, limited to `limit`. Only rows with a
+    /// non-null `ended_at` are returned so the currently-open live row stays
+    /// local until it rotates.
+    func fetchPending(limit: Int) throws -> [LocalEvent] {
+        try dbQueue.read { db in
+            try LocalEvent.fetchAll(db, sql: """
+                SELECT * FROM local_events
+                WHERE status = 'pending' AND ended_at IS NOT NULL
+                ORDER BY started_at ASC
+                LIMIT ?
+                """, arguments: [limit])
+        }
+    }
+
+    /// Bulk-transition rows to `uploaded` and store their server ids. `idMap`
+    /// is the `{local_uuid: server_id}` payload returned by the batch POST.
+    func markUploaded(_ idMap: [String: Int64]) throws {
+        guard !idMap.isEmpty else { return }
+        try dbQueue.write { db in
+            for (uuid, remoteId) in idMap {
+                try db.execute(sql: """
+                    UPDATE local_events
+                    SET status = 'uploaded', remote_id = ?
+                    WHERE local_uuid = ?
+                    """, arguments: [remoteId, uuid])
+            }
+        }
+    }
+
+    /// Bulk-transition rows to `failed`. Used when the server explicitly
+    /// rejected them (malformed, unsafe uuid) so they stop blocking the
+    /// queue. Failed rows are kept for inspection and are not retried.
+    func markFailed(_ uuids: [String]) throws {
+        guard !uuids.isEmpty else { return }
+        try dbQueue.write { db in
+            for uuid in uuids {
+                try db.execute(sql: """
+                    UPDATE local_events
+                    SET status = 'failed'
+                    WHERE local_uuid = ?
+                    """, arguments: [uuid])
+            }
+        }
+    }
+
+    /// Delete uploaded rows older than the given threshold. Keeps the local
+    /// db from growing without bound (server has full history already).
+    @discardableResult
+    func vacuumUploaded(olderThan iso: String) throws -> Int {
+        try dbQueue.write { db in
+            try db.execute(sql: """
+                DELETE FROM local_events
+                WHERE status = 'uploaded' AND COALESCE(ended_at, started_at) < ?
+                """, arguments: [iso])
+            return db.changesCount
+        }
+    }
+
+    /// If the pending backlog exceeds `max`, drop the oldest excess rows so
+    /// the queue doesn't balloon when the server has been offline for days.
+    /// Dropping isn't ideal but unbounded growth is worse.
+    @discardableResult
+    func pruneIfOverflow(max: Int) throws -> Int {
+        try dbQueue.write { db in
+            let current = try Int.fetchOne(db, sql:
+                "SELECT COUNT(*) FROM local_events WHERE status = 'pending'"
+            ) ?? 0
+            guard current > max else { return 0 }
+            let overflow = current - max
+            try db.execute(sql: """
+                DELETE FROM local_events
+                WHERE local_uuid IN (
+                    SELECT local_uuid FROM local_events
+                    WHERE status = 'pending'
+                    ORDER BY started_at ASC
+                    LIMIT ?
+                )
+                """, arguments: [overflow])
+            return overflow
+        }
+    }
 }

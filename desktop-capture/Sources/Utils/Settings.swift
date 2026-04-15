@@ -54,6 +54,11 @@ final class SettingsStore: ObservableObject {
 
     @Published private(set) var hasToken: Bool
     @Published var connectionState: ConnectionState = .unknown
+    @Published var lastSyncedAt: Date?
+
+    /// Stable per-install identifier. Not a secret; the server uses it so
+    /// different Macs owned by the same user don't clobber each other.
+    let deviceID: String
 
     // MARK: Init
 
@@ -63,6 +68,16 @@ final class SettingsStore: ObservableObject {
         self.defaults = defaults
         self.serverURL = defaults.string(forKey: Keys.serverURL) ?? "https://pagefly.ink"
         self.hasToken = (Keychain.load(service: Keys.keychainService, account: Keys.keychainAccount) != nil)
+        if let existing = defaults.string(forKey: Keys.deviceID) {
+            self.deviceID = existing
+        } else {
+            let generated = "dev_" + UUID().uuidString
+                .replacingOccurrences(of: "-", with: "")
+                .lowercased()
+                .prefix(18)
+            self.deviceID = String(generated)
+            defaults.set(self.deviceID, forKey: Keys.deviceID)
+        }
     }
 
     // MARK: Ping
@@ -86,6 +101,7 @@ final class SettingsStore: ObservableObject {
 
     private enum Keys {
         static let serverURL = "pagefly.serverURL"
+        static let deviceID = "pagefly.deviceID"
         static let keychainService = "top.yrzhe.PageflyCapture"
         static let keychainAccount = "api-token"
     }
