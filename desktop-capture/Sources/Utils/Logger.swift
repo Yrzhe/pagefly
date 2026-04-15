@@ -52,12 +52,17 @@ final class FileLogger {
 
 /// Single helper used by the capture pipeline: routes to both os.Logger
 /// (Console.app) and FileLogger (~/Library/Logs/PageFly/capture.log).
+///
+/// IMPORTANT: callers must NEVER pass user content (window titles, URLs,
+/// text excerpts) — those belong only in the local SQLite db. Pass bundle
+/// identifiers, counters, and lifecycle phrases. The os.Logger call uses
+/// `.private` so even an accidental leak gets redacted in production logs.
 func logCapture(_ level: LogLevel, _ message: String) {
     switch level {
-    case .debug: logger.debug("\(message, privacy: .public)")
-    case .info: logger.info("\(message, privacy: .public)")
-    case .warn: logger.warning("\(message, privacy: .public)")
-    case .error: logger.error("\(message, privacy: .public)")
+    case .debug: logger.debug("\(message, privacy: .private)")
+    case .info: logger.info("\(message, privacy: .private)")
+    case .warn: logger.warning("\(message, privacy: .private)")
+    case .error: logger.error("\(message, privacy: .private)")
     }
     FileLogger.shared.write(level, message)
 }

@@ -37,17 +37,22 @@ final class ContextDedup {
     }
 
     /// Process one snapshot. Either inserts a new row, extends the open row,
-    /// or rotates (close current + open new) if the hash changed or the
-    /// 30-minute cap was hit.
+    /// or rotates (close current + open new) if the hash changed or extending
+    /// would push duration to or past the 30-minute cap.
     func ingest(_ snapshot: ContextSnapshot) {
         let hash = ContextHash.compute(snapshot)
         let now = snapshot.capturedAt
 
-        if let open = current,
-           open.hash == hash,
-           open.duration < ContextDedup.hardCutSeconds {
-            extendCurrent(open: open, snapshot: snapshot, at: now)
-            return
+        if let open = current, open.hash == hash {
+            // Project the post-bump duration; rotate if it would meet/exceed
+            // the cap. This guarantees no row ever exceeds hardCutSeconds.
+            let proposedBump = projectedBump(open: open, at: now)
+            if open.duration + proposedBump < ContextDedup.hardCutSeconds {
+                extendCurrent(open: open, snapshot: snapshot, at: now, bump: proposedBump)
+                return
+            }
+            // Hard cap hit — rotate even though hash matches.
+            logCapture(.info, "30-min cap reached, rotating row")
         }
 
         // Hash changed (or hard-cut). Close current and open a new row.
@@ -67,20 +72,24 @@ final class ContextDedup {
 
     // MARK: - Private
 
-    private func extendCurrent(open: Open, snapshot: ContextSnapshot, at now: Date) {
-        let bump = max(1, Int(now.timeIntervalSince(open.lastSeen).rounded()))
-        let cappedBump = min(bump, ContextDedup.bumpInterval * 2)
-        let newDuration = open.duration + cappedBump
+    /// Bump size for the next extension, clamped to bumpInterval*2 so a long
+    /// gap (e.g. a sample missed due to background work) doesn't credit the
+    /// user with arbitrary minutes.
+    private func projectedBump(open: Open, at now: Date) -> Int {
+        let raw = max(1, Int(now.timeIntervalSince(open.lastSeen).rounded()))
+        return min(raw, ContextDedup.bumpInterval * 2)
+    }
 
+    private func extendCurrent(open: Open, snapshot: ContextSnapshot, at now: Date, bump: Int) {
         var updated = open
-        updated.duration = newDuration
+        updated.duration = open.duration + bump
         updated.lastSeen = now
         current = updated
 
         do {
             try db.extend(
                 localUUID: open.localUUID,
-                by: cappedBump,
+                by: bump,
                 endedAt: isoFormatter.string(from: now),
                 textExcerpt: snapshot.textExcerpt
             )
@@ -133,7 +142,10 @@ final class ContextDedup {
                 lastSeen: now,
                 duration: 0
             )
-            logCapture(.info, "open \(snapshot.app): \(snapshot.windowTitle.prefix(60))")
+            // Log only the bundle id — a stable app identifier with no user
+            // content. Window titles, URLs, and text excerpts must NEVER reach
+            // logs (they go into the encrypted SQLite db only).
+            logCapture(.info, "open event (\(snapshot.bundleID))")
         } catch {
             logCapture(.error, "insert failed: \(error)")
         }
