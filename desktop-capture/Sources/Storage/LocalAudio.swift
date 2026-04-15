@@ -18,6 +18,8 @@ struct LocalAudio: Codable, FetchableRecord, MutablePersistableRecord {
     var status: String              // see LocalAudioStatus
     var remote_id: Int64?           // assigned by server on upload (M6)
     var transcript: String?         // filled in M6 once STT finishes
+    var transcribed_at: String?     // ISO8601 — when transcript arrived. Drives 7-day file cleanup.
+    var uploaded_at: String?        // ISO8601 — set when upload succeeds. Anchors the transcription timeout.
     var created_at: String
 
     static let databaseTableName = "local_audio"

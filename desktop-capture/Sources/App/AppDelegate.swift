@@ -36,9 +36,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if hasToken {
                     CapturePipeline.shared.start()
                     Uploader.shared.start()
+                    AudioUploader.shared.start()
                 } else {
                     CapturePipeline.shared.stop(reason: "token cleared")
                     Uploader.shared.stop(reason: "token cleared")
+                    AudioUploader.shared.stop(reason: "token cleared")
                 }
             }
             .store(in: &cancellables)
@@ -78,6 +80,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         CapturePipeline.shared.stop(reason: "app terminating")
         Uploader.shared.stop(reason: "app terminating")
+        AudioUploader.shared.stop(reason: "app terminating")
         // Belt and suspenders: close any in-flight rows directly in the DB.
         let iso = ISO8601DateFormatter().string(from: Date())
         try? LocalDB.shared.closeOpenRows(at: iso)

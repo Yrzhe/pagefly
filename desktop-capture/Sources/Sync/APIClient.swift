@@ -97,6 +97,197 @@ struct APIClient {
         }
     }
 
+    // MARK: - Audio upload (M6)
+
+    enum AudioUploadError: Error {
+        case fileMissing(String)           // local m4a not on disk
+        case unauthorized
+        case server(Int, String)
+        case transport(String)
+        case decode(String)
+    }
+
+    struct AudioUploadResult {
+        let remoteID: Int64
+        let status: String                 // typically "uploaded"
+        let duplicate: Bool
+    }
+
+    struct AudioStatus: Decodable {
+        let id: Int64
+        let status: String                 // uploaded | transcribing | transcribed | failed
+        let duration_s: Int
+        let transcript: String
+        let transcribed_at: String
+        let error: String
+    }
+
+    /// Multipart POST /api/activity/audio. Returns the server row id the
+    /// client should store in LocalAudio.remote_id. Idempotent on local_uuid
+    /// — a second upload for the same uuid returns `duplicate: true` without
+    /// re-transcribing, so crash-retry is safe.
+    func uploadAudio(_ audio: LocalAudio) async throws -> AudioUploadResult {
+        guard !audio.file_path.isEmpty else {
+            throw AudioUploadError.fileMissing(audio.local_uuid)
+        }
+        let fileURL = URL(fileURLWithPath: audio.file_path)
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            throw AudioUploadError.fileMissing(audio.file_path)
+        }
+
+        // Heavy work (file read + multipart assembly) happens on a detached
+        // task so the caller's actor (MainActor for AudioUploader) stays
+        // responsive even on multi-hour recordings. URLSession.data's own
+        // I/O is already off-main.
+        let request: URLRequest
+        do {
+            request = try await Task.detached(priority: .userInitiated) { [serverURL, token, deviceID] in
+                try APIClient.buildAudioUploadRequest(
+                    audio: audio,
+                    fileURL: fileURL,
+                    serverURL: serverURL,
+                    token: token,
+                    deviceID: deviceID
+                )
+            }.value
+        } catch let err as AudioUploadError {
+            throw err
+        } catch {
+            throw AudioUploadError.transport("prepare upload: \(error.localizedDescription)")
+        }
+
+        let (data, response): (Data, URLResponse)
+        do {
+            (data, response) = try await URLSession.shared.data(for: request)
+        } catch let err as URLError {
+            throw AudioUploadError.transport(err.shortDescription)
+        } catch {
+            throw AudioUploadError.transport(String(describing: error))
+        }
+
+        guard let http = response as? HTTPURLResponse else {
+            throw AudioUploadError.transport("no response")
+        }
+        switch http.statusCode {
+        case 200..<300:
+            do {
+                let decoded = try JSONDecoder().decode(AudioUploadResponse.self, from: data)
+                return AudioUploadResult(
+                    remoteID: decoded.id,
+                    status: decoded.status,
+                    duplicate: decoded.duplicate ?? false
+                )
+            } catch {
+                throw AudioUploadError.decode("response decode: \(error)")
+            }
+        case 401, 403:
+            throw AudioUploadError.unauthorized
+        default:
+            let body = String(data: data, encoding: .utf8) ?? ""
+            throw AudioUploadError.server(http.statusCode, String(body.prefix(200)))
+        }
+    }
+
+    /// GET /api/activity/audio/{id}/status. Used to poll transcription state.
+    func getAudioStatus(remoteID: Int64) async throws -> AudioStatus {
+        let url = serverURL
+            .appendingPathComponent("/api/activity/audio/\(remoteID)/status")
+        let request = makeRequest(url: url, method: "GET", timeout: 15)
+
+        let (data, response): (Data, URLResponse)
+        do {
+            (data, response) = try await URLSession.shared.data(for: request)
+        } catch let err as URLError {
+            throw AudioUploadError.transport(err.shortDescription)
+        } catch {
+            throw AudioUploadError.transport(String(describing: error))
+        }
+
+        guard let http = response as? HTTPURLResponse else {
+            throw AudioUploadError.transport("no response")
+        }
+        switch http.statusCode {
+        case 200..<300:
+            do {
+                return try JSONDecoder().decode(AudioStatus.self, from: data)
+            } catch {
+                throw AudioUploadError.decode("status decode: \(error)")
+            }
+        case 401, 403:
+            throw AudioUploadError.unauthorized
+        default:
+            let body = String(data: data, encoding: .utf8) ?? ""
+            throw AudioUploadError.server(http.statusCode, String(body.prefix(200)))
+        }
+    }
+
+    // MARK: - Multipart helpers
+
+    /// Build the full multipart POST request. Intentionally static + `throws`
+    /// so it's callable from `Task.detached` without capturing `self` and
+    /// without running on the caller's actor.
+    fileprivate static func buildAudioUploadRequest(
+        audio: LocalAudio,
+        fileURL: URL,
+        serverURL: URL,
+        token: String,
+        deviceID: String
+    ) throws -> URLRequest {
+        let fileData: Data
+        do {
+            fileData = try Data(contentsOf: fileURL)
+        } catch {
+            throw AudioUploadError.transport("read file: \(error.localizedDescription)")
+        }
+
+        var components = URLComponents(
+            url: serverURL.appendingPathComponent("/api/activity/audio"),
+            resolvingAgainstBaseURL: false
+        )
+        components?.queryItems = [
+            URLQueryItem(name: "local_uuid", value: audio.local_uuid),
+            URLQueryItem(name: "started_at", value: audio.started_at),
+            URLQueryItem(name: "ended_at", value: audio.ended_at ?? ""),
+            URLQueryItem(name: "duration_s", value: String(audio.duration_s)),
+            URLQueryItem(name: "source", value: audio.source),
+            URLQueryItem(name: "trigger_app", value: audio.trigger_app),
+            URLQueryItem(name: "device_id", value: deviceID),
+        ]
+        guard let url = components?.url else {
+            throw AudioUploadError.decode("bad URL composition")
+        }
+
+        let boundary = "pagefly.\(UUID().uuidString)"
+        var request = URLRequest(url: url, timeoutInterval: 180)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("PageflyCapture/0.0.1", forHTTPHeaderField: "User-Agent")
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        request.httpBody = APIClient.multipartBody(
+            fileData: fileData,
+            fileName: fileURL.lastPathComponent,
+            mimeType: "audio/mp4",
+            boundary: boundary
+        )
+        return request
+    }
+
+    private static func multipartBody(
+        fileData: Data,
+        fileName: String,
+        mimeType: String,
+        boundary: String
+    ) -> Data {
+        var body = Data()
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"file\"; filename=\"\(fileName)\"\r\n".data(using: .utf8)!)
+        body.append("Content-Type: \(mimeType)\r\n\r\n".data(using: .utf8)!)
+        body.append(fileData)
+        body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
+        return body
+    }
+
     // MARK: - Helpers
 
     private func makeRequest(url: URL, method: String, timeout: TimeInterval) -> URLRequest {
@@ -107,6 +298,13 @@ struct APIClient {
         r.setValue("PageflyCapture/0.0.1", forHTTPHeaderField: "User-Agent")
         return r
     }
+}
+
+private struct AudioUploadResponse: Decodable {
+    let id: Int64
+    let status: String
+    let size_bytes: Int64?
+    let duplicate: Bool?
 }
 
 // MARK: - Wire types

@@ -93,6 +93,18 @@ final class LocalDB {
                           columns: ["started_at"])
         }
 
+        m.registerMigration("v3_audio_transcribed_at") { db in
+            try db.alter(table: LocalAudio.databaseTableName) { t in
+                t.add(column: "transcribed_at", .text)
+            }
+        }
+
+        m.registerMigration("v4_audio_uploaded_at") { db in
+            try db.alter(table: LocalAudio.databaseTableName) { t in
+                t.add(column: "uploaded_at", .text)
+            }
+        }
+
         return m
     }
 
@@ -245,6 +257,117 @@ final class LocalDB {
                 "SELECT 1 FROM local_audio WHERE local_uuid = ? LIMIT 1",
                 arguments: [uuid]
             ) != nil
+        }
+    }
+
+    // MARK: - Audio uploader helpers (M6)
+
+    /// Oldest `pending_upload` rows first. M6 uploads FIFO.
+    func fetchPendingAudioUpload(limit: Int) throws -> [LocalAudio] {
+        try dbQueue.read { db in
+            try LocalAudio.fetchAll(db, sql: """
+                SELECT * FROM local_audio
+                WHERE status = 'pending_upload'
+                ORDER BY started_at ASC
+                LIMIT ?
+                """, arguments: [limit])
+        }
+    }
+
+    /// Rows that have a remote_id but haven't been marked transcribed yet.
+    /// The uploader polls their status endpoint.
+    func fetchAwaitingTranscription() throws -> [LocalAudio] {
+        try dbQueue.read { db in
+            try LocalAudio.fetchAll(db, sql: """
+                SELECT * FROM local_audio
+                WHERE status IN ('uploading', 'uploaded')
+                  AND remote_id IS NOT NULL
+                ORDER BY started_at ASC
+                """)
+        }
+    }
+
+    func markAudioUploading(uuid: String) throws {
+        try dbQueue.write { db in
+            try db.execute(
+                sql: "UPDATE local_audio SET status = 'uploading' WHERE local_uuid = ?",
+                arguments: [uuid]
+            )
+        }
+    }
+
+    /// Revert a row to pending_upload — used when a transient failure
+    /// (401, transport) interrupts an in-flight upload so the next flush
+    /// picks it up again via fetchPendingAudioUpload.
+    func revertAudioToPending(uuid: String) throws {
+        try dbQueue.write { db in
+            try db.execute(
+                sql: "UPDATE local_audio SET status = 'pending_upload' WHERE local_uuid = ? AND status = 'uploading'",
+                arguments: [uuid]
+            )
+        }
+    }
+
+    func markAudioUploaded(uuid: String, remoteID: Int64, uploadedAtISO: String) throws {
+        try dbQueue.write { db in
+            try db.execute(sql: """
+                UPDATE local_audio
+                SET status = 'uploaded',
+                    remote_id = ?,
+                    uploaded_at = ?
+                WHERE local_uuid = ?
+                """, arguments: [remoteID, uploadedAtISO, uuid])
+        }
+    }
+
+    /// Match by remote_id because the status-poll response keys off the server row id.
+    func markAudioTranscribed(remoteID: Int64, transcript: String, transcribedAtISO: String) throws {
+        try dbQueue.write { db in
+            try db.execute(sql: """
+                UPDATE local_audio
+                SET status = 'transcribed',
+                    transcript = ?,
+                    transcribed_at = ?
+                WHERE remote_id = ?
+                """, arguments: [transcript, transcribedAtISO, remoteID])
+        }
+    }
+
+    /// Terminal failure — stops retrying. Keep the file on disk for a manual
+    /// retry; reconcileOrphans skips rows with a matching uuid so we won't
+    /// re-insert duplicates.
+    func markAudioFailed(uuid: String) throws {
+        try dbQueue.write { db in
+            try db.execute(
+                sql: "UPDATE local_audio SET status = 'failed' WHERE local_uuid = ?",
+                arguments: [uuid]
+            )
+        }
+    }
+
+    /// Rows eligible to have their local .m4a deleted: transcribed and older
+    /// than the cutoff. Transcript stays in the row forever; only the raw
+    /// audio file gets removed to save disk.
+    func fetchTranscribedForFileCleanup(olderThan iso: String) throws -> [LocalAudio] {
+        try dbQueue.read { db in
+            try LocalAudio.fetchAll(db, sql: """
+                SELECT * FROM local_audio
+                WHERE status = 'transcribed'
+                  AND transcribed_at IS NOT NULL
+                  AND transcribed_at < ?
+                  AND file_path <> ''
+                """, arguments: [iso])
+        }
+    }
+
+    /// After we delete the m4a on disk, blank out file_path so we don't
+    /// keep trying. The row itself stays for the transcript.
+    func clearAudioFilePath(uuid: String) throws {
+        try dbQueue.write { db in
+            try db.execute(
+                sql: "UPDATE local_audio SET file_path = '' WHERE local_uuid = ?",
+                arguments: [uuid]
+            )
         }
     }
 }

@@ -117,7 +117,7 @@ struct MenuPanelView: View {
     @ViewBuilder
     private var recordButton: some View {
         if recorder.isRecording {
-            Button(action: { _ = recorder.stop() }) {
+            Button(action: { recorder.stop() }) {
                 Label("Stop recording", systemImage: "stop.circle.fill")
                     .foregroundStyle(.red)
             }
