@@ -1,5 +1,5 @@
-# Xcode
-PageflyCapture.xcodeproj/        # Regenerate via `xcodegen` — project.yml is the source of truth
+# Xcode — regenerate via `xcodegen`; project.yml is the source of truth
+PageflyCapture.xcodeproj/
 xcuserdata/
 DerivedData/
 build/
