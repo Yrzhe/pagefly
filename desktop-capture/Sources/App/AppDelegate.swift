@@ -1,21 +1,47 @@
 import AppKit
+import Combine
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var menuBar: MenuBarController?
     private var preferences: PreferencesWindowController?
+    private var cancellables = Set<AnyCancellable>()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Touch the DB early so any migration error surfaces before the user
+        // does anything.
+        _ = LocalDB.shared
+
         let menuBar = MenuBarController(
             onOpenPreferences: { [weak self] in self?.openPreferences() },
             onQuit: { NSApp.terminate(nil) }
         )
         self.menuBar = menuBar
 
-        // If a token is already in Keychain from a previous launch, ping the
-        // server so the icon ends up coloured before the user clicks anywhere.
+        // Auto-ping if a token is already in Keychain so the menu bar dot is
+        // accurate before the user clicks anywhere.
         if SettingsStore.shared.hasToken {
             Task { await SettingsStore.shared.ping() }
         }
+
+        // Boot the capture pipeline whenever a token exists. Stop it when the
+        // token is forgotten. AX permission is checked inside start().
+        SettingsStore.shared.$hasToken
+            .receive(on: RunLoop.main)
+            .sink { hasToken in
+                if hasToken {
+                    CapturePipeline.shared.start()
+                } else {
+                    CapturePipeline.shared.stop(reason: "token cleared")
+                }
+            }
+            .store(in: &cancellables)
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        CapturePipeline.shared.stop(reason: "app terminating")
+        // Belt and suspenders: close any in-flight rows directly in the DB.
+        let iso = ISO8601DateFormatter().string(from: Date())
+        try? LocalDB.shared.closeOpenRows(at: iso)
     }
 
     private func openPreferences() {

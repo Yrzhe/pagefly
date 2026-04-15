@@ -1,24 +1,33 @@
 import SwiftUI
 
-/// Menu bar dropdown panel. M2 wires the real connection state from
-/// `SettingsStore` and offers a manual Test button. Capture/Recording
-/// affordances land in M3+.
+/// Menu bar dropdown panel. M3 adds the AX permission state and a live event
+/// count from LocalDB so users can see the capture pipeline is doing work.
 struct MenuPanelView: View {
     let onOpenPreferences: () -> Void
     let onQuit: () -> Void
     let onTest: () -> Void
 
     @ObservedObject private var settings = SettingsStore.shared
+    @State private var pendingCount: Int = 0
+    @State private var axTrusted: Bool = AXReader.isAccessibilityTrusted(prompt: false)
+
+    // Refresh pending count + AX state every 3s while the popover is open.
+    private let pollTimer = Timer.publish(every: 3, on: .main, in: .common).autoconnect()
 
     var body: some View {
         VStack(spacing: 0) {
             header
+            if settings.hasToken && !axTrusted {
+                axBanner
+            }
             Divider()
             statusBlock
             Divider()
             footer
         }
         .frame(width: 360)
+        .onReceive(pollTimer) { _ in refresh() }
+        .onAppear { refresh() }
     }
 
     private var header: some View {
@@ -34,9 +43,40 @@ struct MenuPanelView: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
+            if settings.hasToken && axTrusted && pendingCount > 0 {
+                VStack(alignment: .trailing, spacing: 0) {
+                    Text("\(pendingCount)")
+                        .font(.system(size: 14, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.primary)
+                    Text("queued")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.secondary)
+                }
+            }
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 16)
+    }
+
+    private var axBanner: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Accessibility access required")
+                    .font(.system(size: 12, weight: .semibold))
+                Text("PageFly can't read window titles or focused text without it.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button("Grant…", action: openAXPane)
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 10)
+        .background(Color.orange.opacity(0.08))
     }
 
     private var statusBlock: some View {
@@ -83,6 +123,7 @@ struct MenuPanelView: View {
     // MARK: - Derived
 
     private var statusColor: Color {
+        if settings.hasToken && !axTrusted { return .orange }
         switch settings.connectionState {
         case .connected: return .green
         case .checking: return .secondary
@@ -92,8 +133,9 @@ struct MenuPanelView: View {
     }
 
     private var headerSubtitle: String {
+        if settings.hasToken && !axTrusted { return "Permission needed" }
         switch settings.connectionState {
-        case .connected: return "Connected"
+        case .connected: return "Capturing"
         case .checking: return "Testing connection…"
         case .unauthorized: return "Token rejected"
         case .unreachable(let why): return "Unreachable · \(why)"
@@ -109,9 +151,12 @@ struct MenuPanelView: View {
         if !settings.hasToken {
             return "Set your server URL and API token in Preferences to start capturing."
         }
+        if !axTrusted {
+            return "Grant Accessibility access in System Settings → Privacy & Security so PageFly can read which app and window you're focused on."
+        }
         switch settings.connectionState {
         case .connected:
-            return "Talking to \(settings.serverURL). Capture pipeline lands in the next milestone."
+            return "Capture is live. \(pendingCount) event\(pendingCount == 1 ? "" : "s") queued for sync."
         case .checking:
             return "Pinging \(settings.serverURL)…"
         case .unauthorized:
@@ -120,6 +165,19 @@ struct MenuPanelView: View {
             return "Can't reach \(settings.serverURL): \(why). Check the URL or your network."
         case .unknown:
             return "Click Test connection to verify your token + server URL."
+        }
+    }
+
+    private func refresh() {
+        axTrusted = AXReader.isAccessibilityTrusted(prompt: false)
+        pendingCount = (try? LocalDB.shared.pendingEventCount()) ?? 0
+    }
+
+    private func openAXPane() {
+        // Triggers the system prompt + focuses the right Settings pane.
+        _ = AXReader.isAccessibilityTrusted(prompt: true)
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+            NSWorkspace.shared.open(url)
         }
     }
 }

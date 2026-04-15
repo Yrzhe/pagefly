@@ -1,0 +1,142 @@
+import AppKit
+import Combine
+
+/// Top-level orchestrator for screen-context capture. Wires together:
+///   - NSWorkspace app-activation notifications (event-driven sampling)
+///   - A 30s timer (catch long dwell on the same window)
+///   - IdleMonitor (suppress when user is afk > 60s)
+///   - PrivacyFilter → ContextDedup → LocalDB
+///
+/// Started/stopped externally via `start()` / `stop()`. AppDelegate boots it
+/// when SettingsStore has a token.
+@MainActor
+final class CapturePipeline {
+    static let shared = CapturePipeline()
+
+    private(set) var isRunning = false
+
+    private let dedup: ContextDedup
+    private let privacy: PrivacyFilter
+    private var idle: IdleMonitor
+
+    private var sampleTimer: Timer?
+    private var workspaceObserver: NSObjectProtocol?
+    private var sleepObserver: NSObjectProtocol?
+    private var wakeObserver: NSObjectProtocol?
+
+    private var pausedForIdle = false
+
+    private init() {
+        // Defaults built inline so the @MainActor isolation of ContextDedup
+        // is honored without needing default-argument evaluation in the
+        // caller's context.
+        self.dedup = ContextDedup()
+        self.privacy = PrivacyFilter()
+        self.idle = IdleMonitor()
+    }
+
+    // MARK: - Lifecycle
+
+    func start() {
+        guard !isRunning else { return }
+        guard AXReader.isAccessibilityTrusted(prompt: false) else {
+            logCapture(.warn, "AX permission not granted; pipeline parked until user grants it.")
+            return
+        }
+        isRunning = true
+        installObservers()
+        scheduleSampler()
+        sampleNow(reason: "start")
+        logCapture(.info, "Capture pipeline started.")
+    }
+
+    func stop(reason: String = "stop") {
+        guard isRunning else { return }
+        isRunning = false
+        sampleTimer?.invalidate()
+        sampleTimer = nil
+        removeObservers()
+        dedup.flush(at: Date())
+        logCapture(.info, "Capture pipeline stopped (\(reason)).")
+    }
+
+    // MARK: - Observers
+
+    private func installObservers() {
+        let ws = NSWorkspace.shared.notificationCenter
+        workspaceObserver = ws.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.sampleNow(reason: "app-activate") }
+        }
+        sleepObserver = ws.addObserver(
+            forName: NSWorkspace.willSleepNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.flushOnSleep() }
+        }
+        wakeObserver = ws.addObserver(
+            forName: NSWorkspace.didWakeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.sampleNow(reason: "wake") }
+        }
+    }
+
+    private func removeObservers() {
+        let ws = NSWorkspace.shared.notificationCenter
+        if let o = workspaceObserver { ws.removeObserver(o) }
+        if let o = sleepObserver { ws.removeObserver(o) }
+        if let o = wakeObserver { ws.removeObserver(o) }
+        workspaceObserver = nil
+        sleepObserver = nil
+        wakeObserver = nil
+    }
+
+    // MARK: - Sampling
+
+    private func scheduleSampler() {
+        sampleTimer?.invalidate()
+        let timer = Timer.scheduledTimer(withTimeInterval: TimeInterval(ContextDedup.bumpInterval), repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.sampleNow(reason: "tick") }
+        }
+        timer.tolerance = 5
+        sampleTimer = timer
+    }
+
+    private func sampleNow(reason: String) {
+        guard isRunning else { return }
+
+        if idle.isIdle {
+            if !pausedForIdle {
+                pausedForIdle = true
+                dedup.flush(at: Date())
+                logCapture(.info, "Idle > \(Int(idle.threshold))s — pausing capture.")
+            }
+            return
+        }
+        if pausedForIdle {
+            pausedForIdle = false
+            logCapture(.info, "User active again — resuming capture.")
+        }
+
+        guard let raw = AXReader.currentSnapshot() else {
+            logCapture(.debug, "No snapshot available (\(reason)).")
+            return
+        }
+        guard let clean = privacy.sanitize(raw) else {
+            logCapture(.debug, "Filtered \(raw.bundleID) (\(reason)).")
+            return
+        }
+        dedup.ingest(clean)
+    }
+
+    private func flushOnSleep() {
+        dedup.flush(at: Date())
+        logCapture(.info, "System sleeping — flushed open row.")
+    }
+}

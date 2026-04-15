@@ -19,6 +19,11 @@ settings:
     CODE_SIGN_STYLE: Automatic
     DEAD_CODE_STRIPPING: YES
 
+packages:
+  GRDB:
+    url: https://github.com/groue/GRDB.swift
+    from: "7.0.0"
+
 targets:
   PageflyCapture:
     type: application
@@ -27,6 +32,9 @@ targets:
       - path: Sources
     resources:
       - path: Resources
+    dependencies:
+      - package: GRDB
+        product: GRDB
     info:
       path: Resources/Info.plist
       properties:
