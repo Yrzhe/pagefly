@@ -40,6 +40,7 @@ private struct GeneralTab: View {
     @State private var serverDraft: String = ""
     @State private var tokenDraft: String = ""
     @State private var revealToken: Bool = false
+    @State private var saveError: String?
 
     var body: some View {
         Form {
@@ -86,15 +87,19 @@ private struct GeneralTab: View {
                         .keyboardShortcut(.return, modifiers: [.command])
                         .disabled(serverDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
-                    if !settings.hasToken {
-                        Spacer()
-                    } else {
+                    if settings.hasToken {
                         Button("Forget token", role: .destructive, action: forgetToken)
                             .help("Remove the saved API token from Keychain")
                     }
 
                     Spacer()
                     statusBadge
+                }
+                if let saveError {
+                    Label(saveError, systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.red)
+                        .font(.system(size: 11, weight: .medium))
+                        .padding(.top, 4)
                 }
             }
         }
@@ -145,15 +150,24 @@ private struct GeneralTab: View {
         commitServerURL()
         let trimmedToken = tokenDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmedToken.isEmpty {
-            settings.setApiToken(trimmedToken)
-            tokenDraft = ""
+            do {
+                try settings.setApiToken(trimmedToken)
+                tokenDraft = ""
+                saveError = nil
+            } catch {
+                // Surface the failure and abort — pinging would validate the
+                // OLD token still in Keychain and mislead the user.
+                saveError = "Couldn't save to Keychain: \(error)"
+                return
+            }
         }
         Task { await settings.ping() }
     }
 
     private func forgetToken() {
-        settings.setApiToken(nil)
+        try? settings.setApiToken(nil)
         tokenDraft = ""
+        saveError = nil
     }
 }
 

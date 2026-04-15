@@ -6,7 +6,7 @@ import SwiftUI
 /// SwiftUI dropdown panel. Listens to SettingsStore so the icon tint reflects
 /// the current connection state without polling.
 @MainActor
-final class MenuBarController: NSObject {
+final class MenuBarController: NSObject, NSPopoverDelegate {
     private let statusItem: NSStatusItem
     private let popover: NSPopover
     private var eventMonitor: Any?
@@ -28,6 +28,12 @@ final class MenuBarController: NSObject {
         self.popover.animates = true
 
         super.init()
+
+        // Delegate ensures monitor cleanup when AppKit dismisses the popover
+        // through paths that don't go through closePopover() (e.g. clicking
+        // outside, app loses focus). Combined with the idempotent guard in
+        // startMonitoringOutsideClicks, this prevents global monitor leaks.
+        self.popover.delegate = self
 
         configureStatusItem()
         configurePopover()
@@ -121,8 +127,11 @@ final class MenuBarController: NSObject {
     }
 
     private func startMonitoringOutsideClicks() {
+        // Idempotent: clear any prior monitor before installing a new one,
+        // so reopening the popover doesn't stack handlers.
+        stopMonitoringOutsideClicks()
         eventMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
-            self?.closePopover()
+            Task { @MainActor in self?.closePopover() }
         }
     }
 
@@ -131,5 +140,11 @@ final class MenuBarController: NSObject {
             NSEvent.removeMonitor(monitor)
             eventMonitor = nil
         }
+    }
+
+    // MARK: - NSPopoverDelegate
+
+    nonisolated func popoverDidClose(_ notification: Notification) {
+        Task { @MainActor in stopMonitoringOutsideClicks() }
     }
 }

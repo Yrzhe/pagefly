@@ -36,15 +36,13 @@ final class SettingsStore: ObservableObject {
         get { Keychain.load(service: Keys.keychainService, account: Keys.keychainAccount) }
     }
 
-    func setApiToken(_ token: String?) {
+    /// Throws if the Keychain write fails so callers can surface the error
+    /// and avoid pinging with stale credentials. Passing nil or empty string
+    /// deletes the saved token (and never throws).
+    func setApiToken(_ token: String?) throws {
         if let value = token, !value.isEmpty {
-            do {
-                try Keychain.save(value, service: Keys.keychainService, account: Keys.keychainAccount)
-                hasToken = true
-            } catch {
-                logger.error("Keychain save failed: \(String(describing: error))")
-                hasToken = (apiToken != nil)
-            }
+            try Keychain.save(value, service: Keys.keychainService, account: Keys.keychainAccount)
+            hasToken = true
         } else {
             Keychain.delete(service: Keys.keychainService, account: Keys.keychainAccount)
             hasToken = false
