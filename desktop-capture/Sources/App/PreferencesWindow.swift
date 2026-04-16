@@ -41,6 +41,9 @@ private struct GeneralTab: View {
     @State private var tokenDraft: String = ""
     @State private var revealToken: Bool = false
     @State private var saveError: String?
+    @State private var launchAtLogin: Bool = false
+    @State private var launchAtLoginError: String?
+    @State private var launchAtLoginNeedsApproval: Bool = false
 
     var body: some View {
         Form {
@@ -102,6 +105,29 @@ private struct GeneralTab: View {
                         .padding(.top, 4)
                 }
             }
+
+            Section {
+                Toggle("Launch at login", isOn: Binding(
+                    get: { launchAtLogin },
+                    set: { toggleLaunchAtLogin($0) }
+                ))
+                if launchAtLoginNeedsApproval {
+                    Label("Approve PageFly Capture in System Settings → Login Items.", systemImage: "hand.raised")
+                        .foregroundStyle(.orange)
+                        .font(.system(size: 11, weight: .medium))
+                }
+                if let launchAtLoginError {
+                    Label(launchAtLoginError, systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.red)
+                        .font(.system(size: 11, weight: .medium))
+                }
+            } header: {
+                Text("Startup")
+            } footer: {
+                Text("Starts PageFly Capture silently when you log in. Managed by macOS Login Items.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
         .padding(.vertical, 4)
@@ -140,6 +166,21 @@ private struct GeneralTab: View {
         // Don't pre-fill the token field for security; `hasToken` shows
         // whether one is already saved.
         tokenDraft = ""
+        launchAtLogin = LoginItemService.isEnabled
+        launchAtLoginNeedsApproval = LoginItemService.requiresUserApproval
+    }
+
+    private func toggleLaunchAtLogin(_ desired: Bool) {
+        do {
+            try LoginItemService.setEnabled(desired)
+            launchAtLogin = LoginItemService.isEnabled
+            launchAtLoginNeedsApproval = LoginItemService.requiresUserApproval
+            launchAtLoginError = nil
+        } catch {
+            // Roll the toggle back so the UI reflects the real OS state.
+            launchAtLogin = LoginItemService.isEnabled
+            launchAtLoginError = error.localizedDescription
+        }
     }
 
     private func commitServerURL() {
@@ -189,6 +230,8 @@ private struct PrivacyPlaceholder: View {
 // MARK: - About tab
 
 private struct AboutTab: View {
+    @ObservedObject private var updater = UpdateChecker.shared
+
     var body: some View {
         VStack(alignment: .center, spacing: 12) {
             Image(systemName: "circle.fill")
@@ -196,18 +239,93 @@ private struct AboutTab: View {
                 .foregroundStyle(.secondary)
             Text("PageFly Capture")
                 .font(.system(size: 16, weight: .semibold))
-            if let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String {
-                Text("Version \(version)")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-            }
+            Text("Version \(UpdateChecker.currentVersion)")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
             Text("Menu bar client for the PageFly personal knowledge OS.")
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 300)
+
+            Divider().padding(.vertical, 4)
+
+            updateStatusRow
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(24)
+    }
+
+    @ViewBuilder
+    private var updateStatusRow: some View {
+        VStack(spacing: 8) {
+            statusLine
+            HStack(spacing: 8) {
+                Button(action: manualCheck) {
+                    if case .checking = updater.status {
+                        HStack(spacing: 6) {
+                            ProgressView().scaleEffect(0.6).frame(width: 12, height: 12)
+                            Text("Checking…")
+                        }
+                    } else {
+                        Text("Check for Updates")
+                    }
+                }
+                .disabled(isChecking)
+
+                if case .available = updater.status {
+                    Button("Download") { updater.openReleasePage() }
+                        .buttonStyle(.borderedProminent)
+                }
+            }
+            if let last = updater.lastCheckedAt {
+                Text("Last checked \(relative(last))")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+            }
+        }
+    }
+
+    private var isChecking: Bool {
+        if case .checking = updater.status { return true }
+        return false
+    }
+
+    @ViewBuilder
+    private var statusLine: some View {
+        switch updater.status {
+        case .unknown:
+            Text("Updates not checked yet.")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+        case .checking:
+            Text("Checking for updates…")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+        case .upToDate(let current):
+            Label("Up to date · v\(current)", systemImage: "checkmark.seal.fill")
+                .foregroundStyle(.green)
+                .font(.system(size: 11, weight: .semibold))
+        case .available(let release):
+            Label("Update available · v\(release.version)", systemImage: "sparkles")
+                .foregroundStyle(.orange)
+                .font(.system(size: 11, weight: .semibold))
+        case .failed(let why):
+            Label(why, systemImage: "exclamationmark.triangle.fill")
+                .foregroundStyle(.red)
+                .font(.system(size: 11, weight: .medium))
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func manualCheck() {
+        Task { await updater.checkNow(force: true, userInitiated: true) }
+    }
+
+    private func relative(_ date: Date) -> String {
+        let f = RelativeDateTimeFormatter()
+        f.unitsStyle = .short
+        return f.localizedString(for: date, relativeTo: Date())
     }
 }

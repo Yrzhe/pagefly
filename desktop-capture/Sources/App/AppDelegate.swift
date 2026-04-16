@@ -58,6 +58,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
             .store(in: &cancellables)
+
+        // Silent update polling. Surfaces in About tab and (later) menu bar.
+        UpdateChecker.shared.start()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -81,6 +84,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         CapturePipeline.shared.stop(reason: "app terminating")
         Uploader.shared.stop(reason: "app terminating")
         AudioUploader.shared.stop(reason: "app terminating")
+        UpdateChecker.shared.stop()
         // Belt and suspenders: close any in-flight rows directly in the DB.
         let iso = ISO8601DateFormatter().string(from: Date())
         try? LocalDB.shared.closeOpenRows(at: iso)

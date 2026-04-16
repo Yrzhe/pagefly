@@ -61,11 +61,48 @@ will prompt for permissions as features are enabled across milestones. For M1
 
 | # | Scope | Status |
 |---|---|---|
-| M1 | Xcode scaffold + menu bar shell | ✅ in progress |
-| M2 | Settings + Keychain + API ping | — |
-| M3 | AX capture + dedup + local SQLite | — |
-| M4 | Events uploader | — |
-| M5 | Audio recorder (manual) | — |
-| M6 | Audio uploader + STT linkage | — |
-| M7 | LaunchAgent + signing + auto-update | — |
+| M1 | Xcode scaffold + menu bar shell | ✅ |
+| M2 | Settings + Keychain + API ping | ✅ |
+| M3 | AX capture + dedup + local SQLite | ✅ |
+| M4 | Events uploader | ✅ |
+| M5 | Audio recorder (manual) | ✅ |
+| M6 | Audio uploader + STT linkage | ✅ |
+| M7 | Launch-at-login + signing + auto-update | ✅ |
 | M8 | Menu bar UX polish | — |
+
+## Release / signing (M7)
+
+Local unsigned builds run fine after clicking through the Gatekeeper warning.
+Distribution requires a paid Apple Developer account.
+
+One-time setup on the build machine:
+
+```bash
+# Register an app-specific password for notarytool
+xcrun notarytool store-credentials pagefly-notary \
+    --apple-id "you@example.com" \
+    --team-id "ABCDE12345" \
+    --password "<app-specific-password from appleid.apple.com>"
+```
+
+Cut a signed, notarized, stapled build:
+
+```bash
+cd desktop-capture
+DEVELOPER_ID_APP="Developer ID Application: Your Name (ABCDE12345)" \
+NOTARY_KEYCHAIN_PROFILE="pagefly-notary" \
+./scripts/release.sh
+```
+
+Artifacts land in `dist/PageflyCapture.app` and `dist/PageflyCapture.zip`.
+Upload the `.zip` as a GitHub Release asset; the in-app updater polls
+`https://api.github.com/repos/Yrzhe/pagefly/releases/latest` and shows a
+Download button in About → Updates when the tag is newer than the local
+`CFBundleShortVersionString`.
+
+### Launch at login
+
+The General tab exposes a **Launch at login** toggle backed by
+`SMAppService.mainApp`. On first enable, macOS may require the user to
+approve the item in System Settings → General → Login Items; the UI
+surfaces this via a yellow notice.
