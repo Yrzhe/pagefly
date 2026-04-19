@@ -792,15 +792,7 @@ def run_bot() -> None:
     # Text messages (must be last — catch-all)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, _handle_message))
 
-    # Daily chat archive job at 23:55
-    job_queue = app.job_queue
-    if job_queue:
-        job_queue.run_daily(
-            _save_daily_chat,
-            time=datetime.strptime("23:55", "%H:%M").time(),
-            name="daily_chat_archive",
-        )
-        logger.info("Daily chat archive job scheduled at 23:55")
+    # Chat archive is handled by scheduler engine (00:00), not telegram job_queue
 
     logger.info("Telegram bot starting...")
     app.run_polling(drop_pending_updates=True)
@@ -833,14 +825,7 @@ async def start_bot() -> Application:
     app.add_handler(MessageHandler(filters.VIDEO | filters.VIDEO_NOTE, _handle_video))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, _handle_message))
 
-    job_queue = app.job_queue
-    if job_queue:
-        job_queue.run_daily(
-            _save_daily_chat,
-            time=datetime.strptime("23:55", "%H:%M").time(),
-            name="daily_chat_archive",
-        )
-        logger.info("Daily chat archive job scheduled at 23:55")
+    # Chat archive is handled by scheduler engine (00:00), not telegram job_queue
 
     await app.initialize()
     await app.start()
