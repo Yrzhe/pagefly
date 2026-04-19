@@ -44,45 +44,65 @@ final class SettingsStore: ObservableObject {
         }
     }
 
-    /// Reading and writing the token always round-trips through Keychain.
-    /// Treat as a write-only field from outside; never bind it to a SwiftUI
-    /// `@State` for any duration longer than the keystroke session.
-    ///
-    /// WARNING: getter can block the calling thread briefly on first read
-    /// under ad-hoc signing while macOS evaluates keychain access control.
-    /// Never call from the main thread during app launch — use `probeToken()`
-    /// instead. Upload/ping call sites are already on background Tasks.
+    /// Read-only surface for the persisted API token. Backed by `TokenStore`
+    /// (a 0600 file inside Application Support) instead of Keychain — every
+    /// ad-hoc rebuild changes the binary's cdhash, and Keychain ACLs are
+    /// bound to cdhash, so the old design prompted "Always Allow" on every
+    /// rebuild. File-backed storage trades Keychain's per-binary ACL for
+    /// POSIX home-directory protection; for personal use that's a worthwhile
+    /// quiet-life tradeoff. Safe to call from any thread.
     var apiToken: String? {
-        get { Keychain.load(service: Keys.keychainService, account: Keys.keychainAccount) }
+        get { TokenStore.load() }
     }
 
-    /// Throws if the Keychain write fails so callers can surface the error
-    /// and avoid pinging with stale credentials. Passing nil or empty string
-    /// deletes the saved token (and never throws).
+    /// Throws if the on-disk write fails so callers can surface the error
+    /// and avoid pinging with stale credentials. Passing nil or empty
+    /// deletes the saved token (and never throws). Also best-effort sweeps
+    /// the legacy Keychain entry so the user's wallet stops listing it.
     func setApiToken(_ token: String?) throws {
         if let value = token, !value.isEmpty {
-            try Keychain.save(value, service: Keys.keychainService, account: Keys.keychainAccount)
+            try TokenStore.save(value)
+            Keychain.delete(service: Keys.keychainService, account: Keys.keychainAccount)
             hasToken = true
         } else {
+            TokenStore.delete()
             Keychain.delete(service: Keys.keychainService, account: Keys.keychainAccount)
             hasToken = false
             connectionState = .unknown
         }
     }
 
-    /// Read the stored token off the main thread and publish `hasToken` when
-    /// done. Call this once at launch. Under ad-hoc signing, a rebuilt
-    /// binary asking Security for a previously saved item can block while
-    /// macOS resolves access control; doing it here keeps that off the main
-    /// thread so the menu bar can appear immediately.
+    /// Establish `hasToken` off the main thread. Two paths:
+    ///   1. File present → flip to true and we're done.
+    ///   2. File absent but Keychain has a value (pre-TokenStore install) →
+    ///      migrate it once into the file, then delete the Keychain copy.
+    ///      The Keychain read may trigger one final "Always Allow" prompt;
+    ///      after migration succeeds, no future build will touch Keychain.
     func probeToken() {
         Task.detached(priority: .utility) {
-            let present = (Keychain.load(service: Keys.keychainService, account: Keys.keychainAccount) != nil)
-            logCapture(.info, "Keychain probe complete: hasToken=\(present)")
-            await MainActor.run {
-                if self.hasToken != present {
-                    self.hasToken = present
+            if TokenStore.load() != nil {
+                logCapture(.info, "Token probe: file present")
+                await MainActor.run {
+                    if !self.hasToken { self.hasToken = true }
                 }
+                return
+            }
+            if let legacy = Keychain.load(service: Keys.keychainService, account: Keys.keychainAccount) {
+                do {
+                    try TokenStore.save(legacy)
+                    Keychain.delete(service: Keys.keychainService, account: Keys.keychainAccount)
+                    logCapture(.info, "Migrated token from Keychain → file (one-time)")
+                    await MainActor.run {
+                        if !self.hasToken { self.hasToken = true }
+                    }
+                } catch {
+                    logCapture(.warn, "Token migration write failed: \(error)")
+                }
+                return
+            }
+            logCapture(.info, "Token probe: no saved token")
+            await MainActor.run {
+                if self.hasToken { self.hasToken = false }
             }
         }
     }

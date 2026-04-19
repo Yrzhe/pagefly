@@ -31,13 +31,16 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     private var currentState: State = .noConfig
 
     private let onOpenPreferences: () -> Void
+    private let onOpenDashboard: () -> Void
     private let onQuit: () -> Void
 
     init(
         onOpenPreferences: @escaping () -> Void,
+        onOpenDashboard: @escaping () -> Void,
         onQuit: @escaping () -> Void
     ) {
         self.onOpenPreferences = onOpenPreferences
+        self.onOpenDashboard = onOpenDashboard
         self.onQuit = onQuit
 
         self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -80,6 +83,10 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
             onOpenPreferences: { [weak self] in
                 self?.closePopover()
                 self?.onOpenPreferences()
+            },
+            onOpenDashboard: { [weak self] in
+                self?.closePopover()
+                self?.onOpenDashboard()
             },
             onQuit: { [weak self] in
                 self?.closePopover()

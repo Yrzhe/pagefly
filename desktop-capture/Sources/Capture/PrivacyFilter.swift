@@ -19,6 +19,11 @@ struct PrivacyFilter {
         "com.apple.MobileSMS",         // Messages
         "org.whispersystems.signal-desktop",
         "com.tinyspeck.slackmacgap.privatebrowsing", // hypothetical, just an example
+        // Skip self — opening the popover or Dashboard would otherwise
+        // generate "open event (top.yrzhe.PageflyCapture)" rows that ride
+        // up to the server and clutter the daily work log. The user does
+        // not consider "I checked the dashboard" as work-log content.
+        "top.yrzhe.pageflycapture",
     ]
 
     /// AX roles we always drop. AXSecureTextField means a password field is

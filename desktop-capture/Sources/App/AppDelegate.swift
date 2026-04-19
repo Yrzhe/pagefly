@@ -4,6 +4,7 @@ import Combine
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var menuBar: MenuBarController?
     private var preferences: PreferencesWindowController?
+    private var dashboard: DashboardWindowController?
     private var hud: HUDWindowController?
     private var cancellables = Set<AnyCancellable>()
 
@@ -18,6 +19,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let menuBar = MenuBarController(
             onOpenPreferences: { [weak self] in self?.openPreferences() },
+            onOpenDashboard: { [weak self] in self?.openDashboard() },
             onQuit: { NSApp.terminate(nil) }
         )
         self.menuBar = menuBar
@@ -53,6 +55,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     Uploader.shared.stop(reason: "token cleared")
                     AudioUploader.shared.stop(reason: "token cleared")
                 }
+            }
+            .store(in: &cancellables)
+
+        // Auto-recover when AX permission is granted *after* launch. Without
+        // this, `CapturePipeline.start()` parks itself if AX wasn't trusted
+        // at boot and there was no second trigger to retry — so the user
+        // could grant access in System Settings and watch nothing happen
+        // until they quit and relaunch. Reacting to AXTrustMonitor's flip
+        // makes the pipeline come up as soon as the toggle goes on.
+        AXTrustMonitor.shared.$isTrusted
+            .removeDuplicates()
+            .receive(on: RunLoop.main)
+            .sink { trusted in
+                guard trusted, SettingsStore.shared.hasToken else { return }
+                CapturePipeline.shared.start()
             }
             .store(in: &cancellables)
 
@@ -107,6 +124,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         preferences?.showWindow(nil)
         preferences?.window?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func openDashboard() {
+        if dashboard == nil {
+            dashboard = DashboardWindowController()
+        }
+        dashboard?.showWindow(nil)
+        dashboard?.window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
 }

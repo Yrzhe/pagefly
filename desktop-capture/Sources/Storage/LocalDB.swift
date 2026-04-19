@@ -400,4 +400,66 @@ final class LocalDB {
                 """, arguments: [limit])
         }
     }
+
+    /// Most-recent events for the dashboard list. Mixes pending + uploaded
+    /// so the user sees the full picture; the row's own status drives
+    /// whether the delete control appears. Paged because the table can
+    /// grow into the thousands once uploads back up against an offline
+    /// server, and rendering a 5k-row LazyVStack still costs real memory.
+    func fetchRecentEvents(limit: Int, offset: Int = 0) throws -> [LocalEvent] {
+        try dbQueue.read { db in
+            try LocalEvent.fetchAll(db, sql: """
+                SELECT * FROM local_events
+                ORDER BY COALESCE(ended_at, started_at) DESC
+                LIMIT ? OFFSET ?
+                """, arguments: [limit, offset])
+        }
+    }
+
+    /// Total row count — drives the dashboard's page-of-N indicator.
+    func eventCount() throws -> Int {
+        try dbQueue.read { db in
+            try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM local_events") ?? 0
+        }
+    }
+
+    /// Hard-delete a single event row. The dashboard only exposes this for
+    /// `pending` rows so we never destroy something the server already has.
+    /// Refuses to delete uploaded rows even if called by mistake.
+    @discardableResult
+    func deletePendingEvent(localUUID: String) throws -> Bool {
+        try dbQueue.write { db in
+            try db.execute(sql: """
+                DELETE FROM local_events
+                WHERE local_uuid = ? AND status = 'pending'
+                """, arguments: [localUUID])
+            return db.changesCount > 0
+        }
+    }
+
+    /// Hard-delete a local audio row. The dashboard only exposes this for
+    /// rows the server hasn't accepted yet (`pending_upload` or `failed`).
+    /// Caller is responsible for removing the m4a on disk.
+    @discardableResult
+    func deleteLocalAudio(localUUID: String) throws -> Bool {
+        try dbQueue.write { db in
+            try db.execute(sql: """
+                DELETE FROM local_audio
+                WHERE local_uuid = ? AND status IN ('pending_upload', 'failed')
+                """, arguments: [localUUID])
+            return db.changesCount > 0
+        }
+    }
+
+    /// Look up a single audio row — used by the dashboard so the delete
+    /// path can read `file_path` without holding stale view state.
+    func fetchAudio(localUUID: String) throws -> LocalAudio? {
+        try dbQueue.read { db in
+            try LocalAudio.fetchOne(
+                db,
+                sql: "SELECT * FROM local_audio WHERE local_uuid = ?",
+                arguments: [localUUID]
+            )
+        }
+    }
 }

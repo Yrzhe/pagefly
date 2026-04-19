@@ -59,14 +59,40 @@ app_out="$OUTPUT_DIR/$SCHEME.app"
 rm -rf "$app_out"
 cp -R "$app_built" "$app_out"
 
-echo "→ ad-hoc codesign (preserving hardened runtime + entitlements)"
+# Pick a code-signing identity. Preference order:
+#   1. $SIGN_ID env var (lets the user override explicitly)
+#   2. The first "Apple Development" identity in the login keychain — these
+#      have a stable Team ID, so macOS TCC keeps Accessibility/Microphone
+#      grants across rebuilds. Far better than ad-hoc, which gets a fresh
+#      cdhash every build and trips re-grant prompts every time.
+#   3. Fallback: ad-hoc ("-"). Works but the user has to re-grant every
+#      rebuild, which is what we're trying to avoid.
+#
+# This is still NOT the same as signing for distribution — for that you
+# want a "Developer ID Application" cert + notarization (see release.sh).
+ident_line="$(security find-identity -v -p codesigning 2>/dev/null \
+    | grep -E 'Apple Development|Developer ID Application' | head -1)"
+if [[ -n "${SIGN_ID:-}" ]]; then
+    sign_target="${SIGN_ID}"
+    echo "→ signing as: ${sign_target} (from \$SIGN_ID)"
+elif [[ -n "$ident_line" ]]; then
+    sign_target="$(echo "$ident_line" | awk '{print $2}')"
+    sign_label="$(echo "$ident_line" | sed -E 's/^[^"]*"([^"]+)".*/\1/')"
+    echo "→ signing with stable identity: ${sign_label}"
+    echo "  (cdhash will change but Team ID stays — TCC keeps your grants)"
+else
+    sign_target="-"
+    echo "→ no signing identity found in login keychain — falling back to ad-hoc"
+    echo "  WARNING: every rebuild will require re-granting Accessibility / Microphone."
+fi
+
 # CRITICAL: pass --entitlements. A bare `codesign --force --deep --sign -`
 # silently strips the entitlements Xcode baked in, which leaves the hardened
 # runtime enforcing nothing — so the microphone/audio-input grants are
 # missing and AVAudioRecorder.prepareToRecord() returns false. Re-sign with
 # the entitlements file directly so the result is deterministic.
 ent="$project_dir/Resources/PageflyCapture.entitlements"
-codesign --force --deep --sign - -o runtime --entitlements "$ent" "$app_out"
+codesign --force --deep --sign "$sign_target" -o runtime --entitlements "$ent" "$app_out"
 codesign --verify --deep --strict --verbose=2 "$app_out" || true
 # Sanity check: the microphone entitlement must be present, otherwise the
 # next launch will silently break audio capture again.

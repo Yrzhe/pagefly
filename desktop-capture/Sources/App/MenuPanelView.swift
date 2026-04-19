@@ -4,6 +4,7 @@ import SwiftUI
 /// count from LocalDB so users can see the capture pipeline is doing work.
 struct MenuPanelView: View {
     let onOpenPreferences: () -> Void
+    let onOpenDashboard: () -> Void
     let onQuit: () -> Void
     let onTest: () -> Void
 
@@ -106,8 +107,11 @@ struct MenuPanelView: View {
                         .buttonStyle(.bordered)
                         .controlSize(.small)
                         .disabled(settings.connectionState == .checking)
+                    Button("Dashboard…", action: onOpenDashboard)
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
                 }
-                Button("Open Preferences", action: onOpenPreferences)
+                Button("Preferences…", action: onOpenPreferences)
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                 Spacer()
@@ -382,5 +386,10 @@ struct MenuPanelView: View {
 }
 
 #Preview {
-    MenuPanelView(onOpenPreferences: {}, onQuit: {}, onTest: {})
+    MenuPanelView(
+        onOpenPreferences: {},
+        onOpenDashboard: {},
+        onQuit: {},
+        onTest: {}
+    )
 }

@@ -111,6 +111,10 @@ final class ContextDedup {
             logCapture(.error, "close failed for \(open.localUUID): \(error)")
         }
         current = nil
+        // Now that this row has `ended_at` set, it's eligible for upload.
+        // Nudge the uploader so the user sees pending events drain in
+        // seconds rather than waiting on the idle timer.
+        Uploader.shared.kick()
     }
 
     private func startNew(snapshot: ContextSnapshot, hash: String, at now: Date) {

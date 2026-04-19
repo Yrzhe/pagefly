@@ -17,7 +17,12 @@ final class Uploader {
     // MARK: Config
 
     /// Nominal interval between opportunistic drains.
-    static let baseInterval: TimeInterval = 5 * 60
+    /// Idle cadence — used when nothing has rotated lately. The hot path
+    /// is the `kick()` call from `ContextDedup.closeCurrent`, which fires a
+    /// flush within seconds of a freshly-closed event. 60s here is the
+    /// "you've been afk and the capture pipeline didn't fire kick()" floor,
+    /// not the typical drain interval.
+    static let baseInterval: TimeInterval = 60
     /// Rows uploaded per POST.
     static let batchSize = 500
     /// Drop oldest pending rows if queue exceeds this. A real offline spell
@@ -52,6 +57,16 @@ final class Uploader {
         scheduleTimer(after: 15) // first drain 15s after start, not 5min
         installWakeObserver()
         logCapture(.info, "Uploader started")
+    }
+
+    /// External nudge — used by `ContextDedup.closeCurrent` so a freshly
+    /// rotated event ships within seconds instead of waiting on the idle
+    /// timer. Schedules a flush in 1s (small debounce so a burst of rapid
+    /// app switches collapses into one drain). Coalesces with any in-flight
+    /// flush via the existing `isUploading` guard.
+    func kick() {
+        if isStopped { return }
+        scheduleTimer(after: 1)
     }
 
     func stop(reason: String = "stop") {
