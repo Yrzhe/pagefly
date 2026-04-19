@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { LayoutDashboard, FileText, BookOpen, Clock, FolderOpen, Calendar, ArrowRight, Bot, Mic, ChevronDown, ChevronRight, CheckCircle2, Inbox, Loader2, AlertTriangle } from 'lucide-react'
+import { LayoutDashboard, FileText, BookOpen, Clock, FolderOpen, Calendar, ArrowRight, Bot, Mic, ChevronDown, ChevronRight, CheckCircle2, Inbox, Loader2, AlertTriangle, X, ExternalLink } from 'lucide-react'
 import api from '@/api/client'
 import { cn } from '@/lib/utils'
 import { OnboardingWizard } from '@/components/OnboardingWizard'
@@ -71,6 +71,21 @@ interface PendingAudio {
 interface PendingResp {
   days: PendingDay[]
   audio: PendingAudio[]
+}
+
+interface FullEvent {
+  id: number
+  local_uuid: string
+  started_at: string
+  ended_at: string | null
+  duration_s: number
+  app: string
+  window_title: string
+  url: string
+  text_excerpt: string
+  ax_role: string
+  audio_id: number | null
+  device_id: string
 }
 
 const OP_LABELS: Record<string, { label: string; color: string }> = {
@@ -252,41 +267,220 @@ export function DashboardPage() {
 /* ── Subcomponents ── */
 
 function PendingCaptureSection({ data, onOpenWiki }: { data: PendingResp; onOpenWiki: () => void }) {
+  const [detailDay, setDetailDay] = useState<PendingDay | null>(null)
+
   return (
-    <div className="flex gap-6">
-      <div className="flex-1 flex flex-col gap-3">
-        <div className="flex items-baseline gap-3">
-          <span className="text-[10px] font-bold uppercase tracking-[1.5px] text-accent-primary">From Your Mac · awaiting daily summary</span>
-          <span className="text-[10px] text-text-tertiary">last 3 days</span>
-        </div>
-        {data.days.length === 0 ? (
-          <p className="text-xs text-text-tertiary">No desktop capture yet.</p>
-        ) : (
-          <div className="flex flex-col gap-2">
-            {data.days.map((d) => (
-              <PendingDayCard key={d.date} day={d} onOpenWiki={onOpenWiki} />
-            ))}
+    <>
+      <div className="flex gap-6">
+        <div className="flex-1 flex flex-col gap-3">
+          <div className="flex items-baseline gap-3">
+            <span className="text-[10px] font-bold uppercase tracking-[1.5px] text-accent-primary">From Your Mac · awaiting daily summary</span>
+            <span className="text-[10px] text-text-tertiary">last 3 days</span>
           </div>
-        )}
+          {data.days.length === 0 ? (
+            <p className="text-xs text-text-tertiary">No desktop capture yet.</p>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {data.days.map((d) => (
+                <PendingDayCard
+                  key={d.date}
+                  day={d}
+                  onOpenWiki={onOpenWiki}
+                  onViewAll={() => setDetailDay(d)}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="w-[280px] flex flex-col gap-3">
+          <span className="text-[10px] font-bold uppercase tracking-[1.5px] text-accent-primary">Recent Recordings</span>
+          {data.audio.length === 0 ? (
+            <p className="text-xs text-text-tertiary">No recordings.</p>
+          ) : (
+            <div className="flex flex-col gap-1.5">
+              {data.audio.slice(0, 6).map((a) => (
+                <RecordingRow key={a.id} row={a} />
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
-      <div className="w-[280px] flex flex-col gap-3">
-        <span className="text-[10px] font-bold uppercase tracking-[1.5px] text-accent-primary">Recent Recordings</span>
-        {data.audio.length === 0 ? (
-          <p className="text-xs text-text-tertiary">No recordings.</p>
-        ) : (
-          <div className="flex flex-col gap-1.5">
-            {data.audio.slice(0, 6).map((a) => (
-              <RecordingRow key={a.id} row={a} />
-            ))}
-          </div>
-        )}
+      {detailDay && (
+        <DayDetailModal day={detailDay} onClose={() => setDetailDay(null)} />
+      )}
+    </>
+  )
+}
+
+function DayDetailModal({ day, onClose }: { day: PendingDay; onClose: () => void }) {
+  const [events, setEvents] = useState<FullEvent[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [expandedId, setExpandedId] = useState<number | null>(null)
+
+  // Reset scroll lock + Escape-to-close when the modal mounts.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', onKey)
+    document.body.style.overflow = 'hidden'
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      document.body.style.overflow = ''
+    }
+  }, [onClose])
+
+  // Fetch the full day's events from the existing /api/activity/events
+  // endpoint — it already returns rows with full text_excerpt, no
+  // server-side trimming needed for the detail view.
+  useEffect(() => {
+    let cancelled = false
+    const start = `${day.date}T00:00:00`
+    const endDate = new Date(day.date)
+    endDate.setDate(endDate.getDate() + 1)
+    const end = `${endDate.toISOString().slice(0, 10)}T00:00:00`
+    api.get(`/api/activity/events?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&limit=1000`)
+      .then((r) => { if (!cancelled) setEvents(r.data.events || []) })
+      .catch((e) => { if (!cancelled) setError(e?.message || 'Failed to load events') })
+    return () => { cancelled = true }
+  }, [day.date])
+
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-6"
+      onClick={onClose}
+    >
+      <div
+        className="bg-bg-primary border border-border rounded-[12px] shadow-xl w-full max-w-3xl max-h-[85vh] flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center gap-3 px-5 py-4 border-b border-border flex-shrink-0">
+          <Calendar size={14} className="text-accent-primary" />
+          <span className="font-mono text-sm font-semibold text-text-primary">{day.date}</span>
+          {day.summarized ? (
+            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-green-50 text-green-700 flex items-center gap-1">
+              <CheckCircle2 size={9} /> SUMMARIZED
+            </span>
+          ) : (
+            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 flex items-center gap-1">
+              <Inbox size={9} /> PENDING
+            </span>
+          )}
+          <span className="text-[11px] text-text-tertiary">
+            {events ? `${events.length} events` : `${day.event_count} events`}
+            {day.duration_min > 0 && ` · ${formatMinutes(day.duration_min)}`}
+          </span>
+          <button
+            onClick={onClose}
+            className="ml-auto text-text-tertiary hover:text-text-primary transition-colors"
+            aria-label="Close"
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto">
+          {error && (
+            <div className="p-5 text-xs text-red-600">Error: {error}</div>
+          )}
+          {!error && !events && (
+            <div className="p-5 flex items-center gap-2 text-xs text-text-tertiary">
+              <Loader2 size={12} className="animate-spin" /> Loading…
+            </div>
+          )}
+          {events && events.length === 0 && (
+            <div className="p-5 text-xs text-text-tertiary">No events on this day.</div>
+          )}
+          {events && events.length > 0 && (
+            <div className="flex flex-col">
+              {events.map((e) => (
+                <DetailRow
+                  key={e.id}
+                  event={e}
+                  expanded={expandedId === e.id}
+                  onToggle={() => setExpandedId(expandedId === e.id ? null : e.id)}
+                />
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   )
 }
 
-function PendingDayCard({ day, onOpenWiki }: { day: PendingDay; onOpenWiki: () => void }) {
+function DetailRow({ event, expanded, onToggle }: { event: FullEvent; expanded: boolean; onToggle: () => void }) {
+  // Two-line collapsed → full content expanded. The whole row is clickable
+  // so the user doesn't have to aim for a small chevron.
+  const hasMore = (event.text_excerpt && event.text_excerpt.length > 140) || !!event.url
+  return (
+    <div className="border-b border-border last:border-0">
+      <button
+        onClick={onToggle}
+        type="button"
+        className="w-full flex items-start gap-3 px-5 py-3 hover:bg-bg-secondary transition-colors text-left"
+      >
+        <span className="font-mono text-[10px] text-text-tertiary flex-shrink-0 mt-0.5">
+          {event.started_at.slice(11, 19)}
+        </span>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs font-semibold text-text-primary truncate">{event.app || event.local_uuid.slice(0, 6)}</span>
+            {event.window_title && (
+              <>
+                <span className="text-text-tertiary text-[10px]">·</span>
+                <span className="text-[11px] text-text-secondary truncate">{event.window_title}</span>
+              </>
+            )}
+            {event.duration_s > 0 && (
+              <span className="ml-auto text-[10px] text-text-tertiary flex-shrink-0">{event.duration_s}s</span>
+            )}
+          </div>
+          {!expanded && event.text_excerpt && (
+            <div className="text-[11px] text-text-secondary mt-0.5 line-clamp-1">
+              {event.text_excerpt}
+            </div>
+          )}
+        </div>
+        {hasMore && (
+          expanded
+            ? <ChevronDown size={11} className="text-text-tertiary flex-shrink-0 mt-1" />
+            : <ChevronRight size={11} className="text-text-tertiary flex-shrink-0 mt-1" />
+        )}
+      </button>
+      {expanded && (
+        <div className="px-5 pb-3 pl-[68px] flex flex-col gap-2 bg-bg-secondary/30">
+          {event.url && (
+            <a
+              href={event.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-[11px] text-accent-primary hover:underline inline-flex items-center gap-1 break-all"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {event.url} <ExternalLink size={9} className="flex-shrink-0" />
+            </a>
+          )}
+          {event.text_excerpt ? (
+            <pre className="text-[11px] text-text-primary whitespace-pre-wrap font-sans bg-bg-primary border border-border rounded p-3 max-h-[300px] overflow-y-auto">
+              {event.text_excerpt}
+            </pre>
+          ) : (
+            <span className="text-[11px] text-text-tertiary italic">No text captured for this row.</span>
+          )}
+          {event.ax_role && (
+            <div className="text-[10px] text-text-tertiary">
+              <span className="font-mono">{event.ax_role}</span>
+              {event.audio_id && <> · linked audio #{event.audio_id}</>}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function PendingDayCard({ day, onOpenWiki, onViewAll }: { day: PendingDay; onOpenWiki: () => void; onViewAll: () => void }) {
   // Days that already have a Work log start collapsed — the user already
   // has the summary, no need to study the raw rows again. Today (and
   // anything else still pending) starts expanded so it's the first thing
@@ -351,7 +545,18 @@ function PendingDayCard({ day, onOpenWiki }: { day: PendingDay; onOpenWiki: () =
 
               {day.samples.length > 0 && (
                 <div className="flex flex-col gap-1 mt-1">
-                  <span className="text-[9px] font-semibold uppercase tracking-wider text-text-tertiary">Recent rows</span>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[9px] font-semibold uppercase tracking-wider text-text-tertiary">Recent rows</span>
+                    {day.event_count > day.samples.length && (
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); onViewAll() }}
+                        className="text-[10px] text-accent-primary hover:underline inline-flex items-center gap-0.5"
+                      >
+                        View all {day.event_count} events <ArrowRight size={9} />
+                      </button>
+                    )}
+                  </div>
                   {day.samples.map((s, i) => (
                     <div key={`${day.date}-${i}`} className="flex items-start gap-2 text-[10px] py-1 border-b border-border last:border-0">
                       <span className="font-mono text-text-tertiary flex-shrink-0">{s.started_at.slice(11, 16)}</span>
@@ -371,6 +576,15 @@ function PendingDayCard({ day, onOpenWiki }: { day: PendingDay; onOpenWiki: () =
                     </div>
                   ))}
                 </div>
+              )}
+              {day.event_count > 0 && day.samples.length === 0 && (
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); onViewAll() }}
+                  className="text-[11px] text-accent-primary hover:underline self-start inline-flex items-center gap-0.5"
+                >
+                  View all {day.event_count} events <ArrowRight size={9} />
+                </button>
               )}
             </>
           )}

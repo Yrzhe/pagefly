@@ -851,8 +851,10 @@ async def get_pending_activity(days: int = Query(default=3, ge=1, le=14)):
 
         # Most-recent first; trim text excerpts so the response stays small
         # even when a chatty page yielded 2k+ chars per row server-side.
+        # Anything beyond the first 12 is fetched on demand from
+        # /api/activity/events when the user opens the day-detail modal.
         samples: list[dict] = []
-        for e in events[:8]:
+        for e in events[:12]:
             txt = (e.get("text_excerpt") or "")[:280]
             samples.append({
                 "started_at": e.get("started_at"),

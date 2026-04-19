@@ -131,6 +131,49 @@ python -m src.cli load-demo     # adds 3 sample docs + 5 wiki articles
 python -m src.cli clear-demo    # removes them
 ```
 
+## Clients
+
+The server runs on its own — the clients below are optional add-ons that capture content into your PageFly instance.
+
+### Browser extension (Chrome / Edge / Brave / Arc)
+
+One-click clip the page you're reading into your knowledge base.
+
+Path: `browser-extension/` (Manifest V3, unpacked load).
+
+```
+1. Open chrome://extensions (or the equivalent in your Chromium browser)
+2. Enable "Developer mode" (top-right toggle)
+3. "Load unpacked" → pick the browser-extension/ folder of this repo
+4. Click the extension icon → set Server URL = https://api.your-domain
+   and paste your API token from the server's settings page
+5. On any web page, click the extension icon → "Clip this page"
+```
+
+Firefox / Safari are not supported yet (V3 nuances differ enough to need their own builds).
+
+### macOS desktop capture
+
+Menu-bar app that captures your active app + window context every few seconds and lets you record meeting audio that gets transcribed server-side.
+
+Path: `desktop-capture/` (Swift / SwiftUI, Xcode 15+).
+
+**Build a personal-use copy**:
+```bash
+cd desktop-capture
+./scripts/package-local.sh
+# → produces dist/PageflyCapture-<version>.dmg
+open dist/PageflyCapture-*.dmg
+# Drag PageflyCapture.app into Applications
+xattr -dr com.apple.quarantine /Applications/PageflyCapture.app   # ad-hoc signed; clears Gatekeeper warning
+```
+
+Open PageflyCapture from Applications → menu bar icon appears → click → **Preferences** → enter `https://api.your-domain` + API token → grant **Accessibility** + **Microphone** in System Settings → Privacy when prompted. The icon turns green once everything is wired.
+
+The script auto-picks any `Apple Development` or `Developer ID Application` cert in your login keychain (stable identity → TCC keeps your grants across rebuilds). With no cert it falls back to ad-hoc, which works but re-prompts for permissions on every reinstall.
+
+For shipping signed + notarized builds to other people, see `desktop-capture/scripts/release.sh` (requires a paid Apple Developer ID).
+
 ## Tech Stack
 
 ### Backend
