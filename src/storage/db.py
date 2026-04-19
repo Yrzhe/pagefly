@@ -848,6 +848,40 @@ def list_activity_events(
         conn.close()
 
 
+def list_recent_audio(limit: int = 10) -> list[dict]:
+    """Most-recent audio rows regardless of status. Drives the dashboard's
+    'recent recordings' panel — the user wants to see uploads in flight
+    (transcribing) alongside completed ones (transcribed) and any failures.
+    """
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            """SELECT * FROM audio_recordings
+               ORDER BY COALESCE(created_at, started_at) DESC
+               LIMIT ?""",
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def find_wiki_article_by_title(title: str) -> dict | None:
+    """Used by the activity pending-capture panel to mark a day as
+    'already summarized' once the activity_log agent has produced its
+    Work log YYYY-MM-DD article. Returns the row or None.
+    """
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT id, title, file_path, summary, created_at FROM wiki_articles WHERE title = ? LIMIT 1",
+            (title,),
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
 def list_pending_transcriptions(limit: int = 10) -> list[dict]:
     """Audio rows waiting for (or retrying) transcription."""
     conn = get_connection()

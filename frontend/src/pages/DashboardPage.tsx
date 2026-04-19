@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { LayoutDashboard, FileText, BookOpen, Clock, FolderOpen, Calendar, ArrowRight, Bot } from 'lucide-react'
+import { LayoutDashboard, FileText, BookOpen, Clock, FolderOpen, Calendar, ArrowRight, Bot, Mic, ChevronDown, ChevronRight, CheckCircle2, Inbox, Loader2, AlertTriangle } from 'lucide-react'
 import api from '@/api/client'
 import { cn } from '@/lib/utils'
 import { OnboardingWizard } from '@/components/OnboardingWizard'
@@ -32,6 +32,47 @@ interface TrendDay {
   total: number
 }
 
+interface PendingTopApp {
+  app: string
+  minutes: number
+  sessions: number
+}
+
+interface PendingSample {
+  started_at: string
+  app: string
+  window_title: string
+  url: string
+  text_excerpt: string
+}
+
+interface PendingDay {
+  date: string
+  summarized: boolean
+  wiki_article_id: string | null
+  wiki_summary: string
+  event_count: number
+  duration_min: number
+  top_apps: PendingTopApp[]
+  samples: PendingSample[]
+}
+
+interface PendingAudio {
+  id: number
+  started_at: string
+  duration_s: number
+  status: string
+  trigger_app: string
+  transcript_snippet: string
+  transcribed_at: string | null
+  error: string
+}
+
+interface PendingResp {
+  days: PendingDay[]
+  audio: PendingAudio[]
+}
+
 const OP_LABELS: Record<string, { label: string; color: string }> = {
   ingest: { label: 'Ingested', color: 'text-blue-600 bg-blue-50' },
   classify: { label: 'Classified', color: 'text-purple-600 bg-purple-50' },
@@ -54,20 +95,26 @@ export function DashboardPage() {
   const [stats, setStats] = useState<Stats | null>(null)
   const [activity, setActivity] = useState<Activity[]>([])
   const [trends, setTrends] = useState<TrendDay[]>([])
+  const [pending, setPending] = useState<PendingResp | null>(null)
   const [loading, setLoading] = useState(true)
   const [showOnboarding, setShowOnboarding] = useState(false)
   const navigate = useNavigate()
 
   const fetchData = useCallback(async () => {
     try {
-      const [s, a, t] = await Promise.all([
+      const [s, a, t, p] = await Promise.all([
         api.get('/api/stats'),
         api.get('/api/activity?limit=15'),
         api.get('/api/trends?days=14'),
+        // Pending capture is best-effort — if the desktop capture
+        // tables don't exist yet on a fresh install the call may 404,
+        // but we don't want to break the rest of the dashboard.
+        api.get('/api/activity/pending?days=3').catch(() => ({ data: { days: [], audio: [] } })),
       ])
       setStats(s.data)
       setActivity(a.data.activity || [])
       setTrends(t.data.trends || [])
+      setPending(p.data)
     } catch (err) { console.error('Dashboard fetch error:', err) }
     finally { setLoading(false) }
   }, [])
@@ -190,12 +237,200 @@ export function DashboardPage() {
             </div>
           </div>
         </div>
+
+        {pending && (pending.days.length > 0 || pending.audio.length > 0) && (
+          <PendingCaptureSection
+            data={pending}
+            onOpenWiki={() => navigate('/wiki')}
+          />
+        )}
       </div>
     </div>
   )
 }
 
 /* ── Subcomponents ── */
+
+function PendingCaptureSection({ data, onOpenWiki }: { data: PendingResp; onOpenWiki: () => void }) {
+  return (
+    <div className="flex gap-6">
+      <div className="flex-1 flex flex-col gap-3">
+        <div className="flex items-baseline gap-3">
+          <span className="text-[10px] font-bold uppercase tracking-[1.5px] text-accent-primary">From Your Mac · awaiting daily summary</span>
+          <span className="text-[10px] text-text-tertiary">last 3 days</span>
+        </div>
+        {data.days.length === 0 ? (
+          <p className="text-xs text-text-tertiary">No desktop capture yet.</p>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {data.days.map((d) => (
+              <PendingDayCard key={d.date} day={d} onOpenWiki={onOpenWiki} />
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="w-[280px] flex flex-col gap-3">
+        <span className="text-[10px] font-bold uppercase tracking-[1.5px] text-accent-primary">Recent Recordings</span>
+        {data.audio.length === 0 ? (
+          <p className="text-xs text-text-tertiary">No recordings.</p>
+        ) : (
+          <div className="flex flex-col gap-1.5">
+            {data.audio.slice(0, 6).map((a) => (
+              <RecordingRow key={a.id} row={a} />
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function PendingDayCard({ day, onOpenWiki }: { day: PendingDay; onOpenWiki: () => void }) {
+  // Days that already have a Work log start collapsed — the user already
+  // has the summary, no need to study the raw rows again. Today (and
+  // anything else still pending) starts expanded so it's the first thing
+  // they see.
+  const [expanded, setExpanded] = useState(!day.summarized)
+  const empty = day.event_count === 0
+
+  return (
+    <div className="border border-border rounded-[8px] overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className="w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-bg-secondary transition-colors"
+      >
+        {expanded ? <ChevronDown size={12} className="text-text-tertiary flex-shrink-0" /> : <ChevronRight size={12} className="text-text-tertiary flex-shrink-0" />}
+        <span className="text-xs font-semibold text-text-primary font-mono">{day.date}</span>
+        {day.summarized ? (
+          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-green-50 text-green-700 flex items-center gap-1">
+            <CheckCircle2 size={9} /> SUMMARIZED
+          </span>
+        ) : (
+          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 flex items-center gap-1">
+            <Inbox size={9} /> PENDING
+          </span>
+        )}
+        <span className="ml-auto text-[10px] text-text-tertiary flex items-center gap-3">
+          <span>{day.event_count} events</span>
+          {day.duration_min > 0 && <span>{formatMinutes(day.duration_min)}</span>}
+        </span>
+      </button>
+
+      {expanded && (
+        <div className="px-3 pb-3 pt-1 flex flex-col gap-2 border-t border-border">
+          {day.summarized && day.wiki_summary && (
+            <button
+              onClick={onOpenWiki}
+              className="text-left text-[11px] text-text-secondary bg-green-50 border border-green-100 rounded p-2 hover:bg-green-100 transition-colors"
+            >
+              <span className="font-semibold text-green-800">Work log {day.date}: </span>
+              {day.wiki_summary}
+              <ArrowRight size={9} className="inline-block ml-1" />
+            </button>
+          )}
+
+          {empty ? (
+            <p className="text-[11px] text-text-tertiary py-2">No capture this day.</p>
+          ) : (
+            <>
+              {day.top_apps.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {day.top_apps.map((a) => (
+                    <span
+                      key={a.app}
+                      className="text-[10px] px-1.5 py-0.5 rounded bg-bg-tertiary text-text-secondary"
+                      title={`${a.sessions} sessions`}
+                    >
+                      {a.app} · {formatMinutes(a.minutes)}
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              {day.samples.length > 0 && (
+                <div className="flex flex-col gap-1 mt-1">
+                  <span className="text-[9px] font-semibold uppercase tracking-wider text-text-tertiary">Recent rows</span>
+                  {day.samples.map((s, i) => (
+                    <div key={`${day.date}-${i}`} className="flex items-start gap-2 text-[10px] py-1 border-b border-border last:border-0">
+                      <span className="font-mono text-text-tertiary flex-shrink-0">{s.started_at.slice(11, 16)}</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-semibold text-text-primary truncate">{s.app}</span>
+                          {s.window_title && (
+                            <>
+                              <span className="text-text-tertiary">·</span>
+                              <span className="text-text-secondary truncate">{s.window_title}</span>
+                            </>
+                          )}
+                        </div>
+                        {s.url && <div className="text-text-tertiary truncate">{s.url}</div>}
+                        {s.text_excerpt && <div className="text-text-secondary mt-0.5 line-clamp-2">{s.text_excerpt}</div>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function RecordingRow({ row }: { row: PendingAudio }) {
+  return (
+    <div className="flex items-start gap-2 p-2 border border-border rounded-[6px]">
+      <Mic size={11} className="text-text-tertiary mt-0.5 flex-shrink-0" />
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-1.5">
+          <span className="text-[11px] font-semibold text-text-primary font-mono">{formatDuration(row.duration_s)}</span>
+          <RecordingStatus status={row.status} />
+        </div>
+        {row.trigger_app && (
+          <div className="text-[10px] text-text-tertiary truncate">{row.trigger_app}</div>
+        )}
+        {row.transcript_snippet && (
+          <div className="text-[10px] text-text-secondary mt-1 line-clamp-2">{row.transcript_snippet}</div>
+        )}
+        {row.error && (
+          <div className="text-[10px] text-red-600 mt-1 truncate" title={row.error}>{row.error}</div>
+        )}
+        <div className="text-[9px] text-text-tertiary mt-0.5">{timeAgo(row.started_at)}</div>
+      </div>
+    </div>
+  )
+}
+
+function RecordingStatus({ status }: { status: string }) {
+  if (status === 'transcribed') return <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-green-50 text-green-700">DONE</span>
+  if (status === 'failed') return (
+    <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-red-50 text-red-700 flex items-center gap-0.5">
+      <AlertTriangle size={8} /> FAIL
+    </span>
+  )
+  if (status === 'uploaded' || status === 'transcribing') return (
+    <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-blue-50 text-blue-700 flex items-center gap-0.5">
+      <Loader2 size={8} className="animate-spin" /> {status === 'uploaded' ? 'STT' : 'STT'}
+    </span>
+  )
+  return <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-gray-100 text-gray-600">{status.toUpperCase()}</span>
+}
+
+function formatMinutes(min: number): string {
+  if (min < 60) return `${min}m`
+  const h = Math.floor(min / 60)
+  const m = min % 60
+  return m === 0 ? `${h}h` : `${h}h${m}m`
+}
+
+function formatDuration(seconds: number): string {
+  const m = Math.floor(seconds / 60)
+  const s = seconds % 60
+  return `${m}:${String(s).padStart(2, '0')}`
+}
 
 function StatCard({ icon, label, value, sub, onClick }: { icon: React.ReactNode; label: string; value: number; sub: string; onClick?: () => void }) {
   return (

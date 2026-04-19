@@ -803,6 +803,101 @@ async def list_activity_events_api(
     return {"events": rows, "count": len(rows)}
 
 
+@app.get("/api/activity/pending", dependencies=[Depends(verify_token)])
+async def get_pending_activity(days: int = Query(default=3, ge=1, le=14)):
+    """Per-day rollup of capture data + recent recordings for the dashboard.
+
+    For each of the last `days` days (local time), returns event counts +
+    duration + per-app breakdown + a small text-excerpt sample, plus a
+    `summarized` flag set when the activity_log agent has already produced
+    a `Work log YYYY-MM-DD` wiki article for that date. Frontend uses this
+    to distinguish "still pending review" days from "already filed away"
+    days under the Recent Activity section. Audio rows are returned
+    independently because they aren't bucketed by day in any meaningful
+    way — the user thinks of recordings as a flat recency-sorted list.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    local_today = datetime.now(timezone.utc).astimezone().date()
+    days_data: list[dict] = []
+    for offset in range(days):
+        d = local_today - timedelta(days=offset)
+        date_str = d.strftime("%Y-%m-%d")
+        # ISO8601 ranges are in local naive form because list_activity_events
+        # compares text columns directly — events are stored as the client
+        # captured them (local-time ISO8601) and a TZ shift here would miss
+        # rows on day boundaries.
+        start_iso = f"{date_str}T00:00:00"
+        end_iso = (datetime.combine(d + timedelta(days=1), datetime.min.time())
+                   ).strftime("%Y-%m-%dT00:00:00")
+
+        # 800 cap is generous enough for a busy day yet still bounded so a
+        # runaway capture batch doesn't OOM the response.
+        events = db.list_activity_events(start=start_iso, end=end_iso, limit=800)
+
+        wiki = db.find_wiki_article_by_title(f"Work log {date_str}")
+
+        # Per-app rollup
+        by_app: dict[str, dict] = {}
+        total_secs = 0
+        for e in events:
+            app_name = e.get("app") or "Unknown"
+            secs = int(e.get("duration_s") or 0)
+            total_secs += secs
+            entry = by_app.setdefault(app_name, {"app": app_name, "duration_s": 0, "sessions": 0})
+            entry["duration_s"] += secs
+            entry["sessions"] += 1
+        top_apps = sorted(by_app.values(), key=lambda x: -x["duration_s"])[:6]
+
+        # Most-recent first; trim text excerpts so the response stays small
+        # even when a chatty page yielded 2k+ chars per row server-side.
+        samples: list[dict] = []
+        for e in events[:8]:
+            txt = (e.get("text_excerpt") or "")[:280]
+            samples.append({
+                "started_at": e.get("started_at"),
+                "app": e.get("app") or "",
+                "window_title": (e.get("window_title") or "")[:120],
+                "url": (e.get("url") or "")[:160],
+                "text_excerpt": txt,
+            })
+
+        days_data.append({
+            "date": date_str,
+            "summarized": wiki is not None,
+            "wiki_article_id": wiki["id"] if wiki else None,
+            "wiki_summary": (wiki["summary"] if wiki and wiki.get("summary") else "")[:240],
+            "event_count": len(events),
+            "duration_min": total_secs // 60,
+            "top_apps": [
+                {
+                    "app": a["app"],
+                    "minutes": a["duration_s"] // 60,
+                    "sessions": a["sessions"],
+                }
+                for a in top_apps
+            ],
+            "samples": samples,
+        })
+
+    audio_rows = db.list_recent_audio(limit=12)
+    audio_data: list[dict] = []
+    for a in audio_rows:
+        transcript = (a.get("transcript") or "")[:200]
+        audio_data.append({
+            "id": a["id"],
+            "started_at": a["started_at"],
+            "duration_s": a.get("duration_s", 0),
+            "status": a["status"],
+            "trigger_app": a.get("trigger_app", "") or "",
+            "transcript_snippet": transcript,
+            "transcribed_at": a.get("transcribed_at"),
+            "error": a.get("error", "") or "",
+        })
+
+    return {"days": days_data, "audio": audio_data}
+
+
 # ── Prompts ──
 
 @app.get("/api/prompts", dependencies=[Depends(verify_token)])
