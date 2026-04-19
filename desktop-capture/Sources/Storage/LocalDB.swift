@@ -370,4 +370,34 @@ final class LocalDB {
             )
         }
     }
+
+    // MARK: - Dashboard / retention helpers
+
+    /// Rows where the m4a is still on disk, ordered most-recent first. Skips
+    /// `pending_upload` so a slow upload queue can never be silently culled
+    /// by the keep-N cap before it ships. Used by both the dashboard list
+    /// and the keep-N retention enforcer.
+    func fetchRetainedAudioFiles() throws -> [LocalAudio] {
+        try dbQueue.read { db in
+            try LocalAudio.fetchAll(db, sql: """
+                SELECT * FROM local_audio
+                WHERE file_path <> ''
+                  AND status IN ('uploaded', 'transcribed')
+                ORDER BY COALESCE(uploaded_at, created_at) DESC
+                """)
+        }
+    }
+
+    /// Most-recent audio rows for the dashboard list, regardless of file
+    /// presence — we still want to show the user a transcribed/failed row
+    /// even after its m4a is gone.
+    func fetchRecentAudio(limit: Int) throws -> [LocalAudio] {
+        try dbQueue.read { db in
+            try LocalAudio.fetchAll(db, sql: """
+                SELECT * FROM local_audio
+                ORDER BY COALESCE(uploaded_at, created_at) DESC
+                LIMIT ?
+                """, arguments: [limit])
+        }
+    }
 }

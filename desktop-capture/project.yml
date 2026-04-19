@@ -30,11 +30,20 @@ targets:
     platform: macOS
     sources:
       - path: Sources
+      # Asset catalogs must live under `sources` so xcodegen runs actool on
+      # them; listing under `resources` only copies the raw folder.
+      - path: Resources/Assets.xcassets
     resources:
       - path: Resources
+        excludes:
+          - Assets.xcassets
+          - Assets.xcassets/**
     dependencies:
       - package: GRDB
         product: GRDB
+    settings:
+      base:
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     info:
       path: Resources/Info.plist
       properties:
@@ -43,6 +52,8 @@ targets:
         CFBundleIdentifier: top.yrzhe.PageflyCapture
         CFBundleShortVersionString: "0.0.1"
         CFBundleVersion: "1"
+        CFBundleIconName: AppIcon
+        CFBundleIconFile: AppIcon
         LSMinimumSystemVersion: "13.0"
         LSUIElement: true  # Menu bar only — no Dock icon, no main window on launch.
         NSAccessibilityUsageDescription: >

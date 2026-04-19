@@ -22,11 +22,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         self.menuBar = menuBar
 
-        // Auto-ping if a token is already in Keychain so the menu bar dot is
-        // accurate before the user clicks anywhere.
-        if SettingsStore.shared.hasToken {
-            Task { await SettingsStore.shared.ping() }
-        }
+        // Probe Keychain off the main thread so the menu bar never stalls
+        // on `SecItemCopyMatching`. `hasToken` flips to true once the probe
+        // returns, which triggers the auto-ping + pipeline start below via
+        // the $hasToken sink.
+        SettingsStore.shared.probeToken()
+
+        // Auto-ping the first time `hasToken` becomes true so the menu bar
+        // icon is accurate before the user clicks anywhere.
+        SettingsStore.shared.$hasToken
+            .removeDuplicates()
+            .filter { $0 }
+            .first()
+            .sink { _ in
+                Task { await SettingsStore.shared.ping() }
+            }
+            .store(in: &cancellables)
 
         // Boot capture + uploader whenever a token exists. Stop them when
         // the token is forgotten. AX permission is checked inside start().

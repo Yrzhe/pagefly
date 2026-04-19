@@ -10,9 +10,14 @@ struct MenuPanelView: View {
     @ObservedObject private var settings = SettingsStore.shared
     @ObservedObject private var recorder = AudioRecorder.shared
     @State private var pendingCount: Int = 0
-    @State private var axTrusted: Bool = AXReader.isAccessibilityTrusted(prompt: false)
+    @State private var pendingAudioCount: Int = 0
+    @State private var recentAudio: [LocalAudio] = []
+    @State private var axTrusted: Bool = false
 
-    // Refresh pending count + AX state every 3s while the popover is open.
+    // Panel polls its own AX + queue state. The menu bar icon reads the
+    // same AX state from the shared AXTrustMonitor, but SwiftUI views
+    // don't observe it directly — @ObservedObject on a MainActor singleton
+    // during NSHostingController init has caused a startup hang in testing.
     private let pollTimer = Timer.publish(every: 3, on: .main, in: .common).autoconnect()
 
     var body: some View {
@@ -23,6 +28,10 @@ struct MenuPanelView: View {
             }
             Divider()
             statusBlock
+            if settings.hasToken {
+                Divider()
+                dashboardBlock
+            }
             Divider()
             footer
         }
@@ -86,7 +95,7 @@ struct MenuPanelView: View {
                 .font(.system(size: 10, weight: .semibold))
                 .tracking(1.5)
                 .foregroundStyle(Color(white: 0.55))
-            Text(blockBody)
+            blockBodyView
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -149,6 +158,7 @@ struct MenuPanelView: View {
     // MARK: - Derived
 
     private var statusColor: Color {
+        if recorder.isRecording { return .red }
         if settings.hasToken && !axTrusted { return .orange }
         switch settings.connectionState {
         case .connected: return .green
@@ -159,6 +169,7 @@ struct MenuPanelView: View {
     }
 
     private var headerSubtitle: String {
+        if recorder.isRecording { return "Recording in progress" }
         if settings.hasToken && !axTrusted { return "Permission needed" }
         switch settings.connectionState {
         case .connected: return "Capturing"
@@ -173,7 +184,21 @@ struct MenuPanelView: View {
         settings.hasToken ? "STATUS" : "WELCOME"
     }
 
-    private var blockBody: String {
+    @ViewBuilder
+    private var blockBodyView: some View {
+        if recorder.isRecording {
+            // TimelineView ticks every second so the elapsed label stays
+            // fresh without relying on the panel's 3s poll or plumbing a
+            // @Published duration out of AudioRecorder.
+            TimelineView(.periodic(from: .now, by: 1)) { _ in
+                Text("Recording · \(formatElapsed(recorder.elapsedSeconds)). The floating HUD lets you stop from anywhere.")
+            }
+        } else {
+            Text(blockBodyText)
+        }
+    }
+
+    private var blockBodyText: String {
         if !settings.hasToken {
             return "Set your server URL and API token in Preferences to start capturing."
         }
@@ -195,6 +220,15 @@ struct MenuPanelView: View {
         }
     }
 
+    private func formatElapsed(_ seconds: Int) -> String {
+        let m = seconds / 60
+        let s = seconds % 60
+        if m >= 60 {
+            return String(format: "%d:%02d:%02d", m / 60, m % 60, s)
+        }
+        return String(format: "%d:%02d", m, s)
+    }
+
     private func lastSyncedLabel() -> String {
         guard let when = settings.lastSyncedAt else { return "Not synced yet." }
         let seconds = Int(Date().timeIntervalSince(when))
@@ -205,8 +239,133 @@ struct MenuPanelView: View {
     }
 
     private func refresh() {
-        axTrusted = AXReader.isAccessibilityTrusted(prompt: false)
         pendingCount = (try? LocalDB.shared.pendingEventCount()) ?? 0
+        pendingAudioCount = (try? LocalDB.shared.pendingAudioCount()) ?? 0
+        recentAudio = (try? LocalDB.shared.fetchRecentAudio(limit: 5)) ?? []
+        axTrusted = AXReader.isAccessibilityTrusted(prompt: false)
+    }
+
+    // MARK: - Dashboard
+
+    private var dashboardBlock: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("DASHBOARD")
+                .font(.system(size: 10, weight: .semibold))
+                .tracking(1.5)
+                .foregroundStyle(Color(white: 0.55))
+
+            HStack(spacing: 14) {
+                queueStat(
+                    label: "Events queued",
+                    count: pendingCount,
+                    systemImage: "tray.full"
+                )
+                queueStat(
+                    label: "Audio waiting",
+                    count: pendingAudioCount,
+                    systemImage: "waveform"
+                )
+            }
+
+            if recentAudio.isEmpty {
+                Text("No recordings yet.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            } else {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Recent recordings")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(.secondary)
+                    ForEach(recentAudio, id: \.local_uuid) { row in
+                        recentAudioRow(row)
+                    }
+                }
+                .padding(.top, 2)
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 14)
+    }
+
+    private func queueStat(label: String, count: Int, systemImage: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: systemImage)
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+            Text("\(count)")
+                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                .monospacedDigit()
+            Text(label)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func recentAudioRow(_ row: LocalAudio) -> some View {
+        HStack(spacing: 8) {
+            Circle()
+                .fill(audioStatusColor(row.status))
+                .frame(width: 6, height: 6)
+            Text(formatRecordingDuration(row.duration_s))
+                .font(.system(size: 11, weight: .medium, design: .rounded))
+                .monospacedDigit()
+                .frame(width: 44, alignment: .leading)
+            Text(audioStatusLabel(row))
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            Spacer()
+            Text(audioAgeLabel(row))
+                .font(.system(size: 10))
+                .foregroundStyle(.tertiary)
+                .monospacedDigit()
+        }
+    }
+
+    private func audioStatusColor(_ raw: String) -> Color {
+        switch LocalAudioStatus(rawValue: raw) {
+        case .recording: return .red
+        case .pending_upload, .uploading: return .orange
+        case .uploaded: return .blue
+        case .transcribed: return .green
+        case .failed: return .red
+        case .none: return .secondary
+        }
+    }
+
+    private func audioStatusLabel(_ row: LocalAudio) -> String {
+        switch LocalAudioStatus(rawValue: row.status) {
+        case .recording: return "Recording"
+        case .pending_upload: return "Waiting to upload"
+        case .uploading: return "Uploading…"
+        case .uploaded: return "Transcribing…"
+        case .transcribed:
+            // File-on-disk status matters here so the user understands why
+            // a transcript exists but they can't replay the m4a anymore.
+            return row.file_path.isEmpty ? "Transcribed (file pruned)" : "Transcribed"
+        case .failed: return "Failed"
+        case .none: return row.status
+        }
+    }
+
+    private func formatRecordingDuration(_ seconds: Int) -> String {
+        let m = seconds / 60
+        let s = seconds % 60
+        return String(format: "%d:%02d", m, s)
+    }
+
+    private func audioAgeLabel(_ row: LocalAudio) -> String {
+        // Prefer uploaded_at over started_at because the dashboard list is
+        // ordered by upload recency; mixing two clocks would scramble it.
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let stamp = row.uploaded_at ?? row.started_at
+        guard let when = iso.date(from: stamp) else { return "" }
+        let seconds = Int(Date().timeIntervalSince(when))
+        if seconds < 60 { return "now" }
+        if seconds < 3600 { return "\(seconds / 60)m" }
+        if seconds < 86400 { return "\(seconds / 3600)h" }
+        return "\(seconds / 86400)d"
     }
 
     private func openAXPane() {
@@ -215,6 +374,10 @@ struct MenuPanelView: View {
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
             NSWorkspace.shared.open(url)
         }
+        // Nudge the shared trust monitor so the icon + panel flip as soon
+        // as the user flicks the switch in System Settings, rather than
+        // waiting for the next 5s poll.
+        AXTrustMonitor.shared.refresh()
     }
 }
 

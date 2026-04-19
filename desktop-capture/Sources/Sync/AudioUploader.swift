@@ -241,8 +241,14 @@ final class AudioUploader {
 
     // MARK: Vacuum
 
-    /// Delete raw .m4a files for recordings transcribed > retention days ago.
-    /// Transcript (stored in the DB row) stays forever.
+    /// Two-pass vacuum:
+    ///   (1) Time-based: delete .m4a for transcripts older than `fileRetentionDays`.
+    ///   (2) Count-based: enforce the user's `audioRetentionCount` cap so the
+    ///       N most-recent uploaded/transcribed files stay and everything
+    ///       older gets removed even if it's still inside the time window
+    ///       (e.g. user set "keep 0" → delete on upload).
+    /// Transcripts (stored in the DB row) stay forever; only the raw m4a
+    /// bytes are touched.
     private func vacuumExpiredFiles() {
         let cutoff = Date().addingTimeInterval(-Double(AudioUploader.fileRetentionDays) * 86400)
         let cutoffISO = AudioUploader.iso.string(from: cutoff)
@@ -250,18 +256,44 @@ final class AudioUploader {
             let rows = try LocalDB.shared.fetchTranscribedForFileCleanup(olderThan: cutoffISO)
             var removed = 0
             for row in rows {
-                let path = row.file_path
-                if FileManager.default.fileExists(atPath: path) {
-                    try? FileManager.default.removeItem(atPath: path)
-                    removed += 1
-                }
+                if removeAudioFile(at: row.file_path) { removed += 1 }
                 try? LocalDB.shared.clearAudioFilePath(uuid: row.local_uuid)
             }
             if removed > 0 {
                 logCapture(.info, "Vacuumed \(removed) m4a files older than \(AudioUploader.fileRetentionDays)d")
             }
         } catch {
-            logCapture(.warn, "Audio vacuum failed: \(error)")
+            logCapture(.warn, "Audio time-vacuum failed: \(error)")
+        }
+
+        let keep = max(0, SettingsStore.shared.audioRetentionCount)
+        do {
+            let retained = try LocalDB.shared.fetchRetainedAudioFiles()
+            // First `keep` are the most recent — protect them; drop the rest.
+            let drop = retained.count > keep ? Array(retained.dropFirst(keep)) : []
+            var removed = 0
+            for row in drop {
+                if removeAudioFile(at: row.file_path) { removed += 1 }
+                try? LocalDB.shared.clearAudioFilePath(uuid: row.local_uuid)
+            }
+            if removed > 0 {
+                logCapture(.info, "Pruned \(removed) m4a files beyond keep-N=\(keep)")
+            }
+        } catch {
+            logCapture(.warn, "Audio keep-N vacuum failed: \(error)")
+        }
+    }
+
+    /// Returns true iff a file existed at the path and was successfully
+    /// removed. Missing files are silent (vacuum may run twice).
+    private func removeAudioFile(at path: String) -> Bool {
+        guard !path.isEmpty, FileManager.default.fileExists(atPath: path) else { return false }
+        do {
+            try FileManager.default.removeItem(atPath: path)
+            return true
+        } catch {
+            logCapture(.warn, "Failed to remove \(path): \(error)")
+            return false
         }
     }
 

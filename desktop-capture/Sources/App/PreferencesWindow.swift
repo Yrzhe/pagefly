@@ -48,7 +48,7 @@ private struct GeneralTab: View {
     var body: some View {
         Form {
             Section {
-                TextField("Server URL", text: $serverDraft, prompt: Text("https://pagefly.ink"))
+                TextField("Server URL", text: $serverDraft, prompt: Text("https://api.pagefly.ink"))
                     .textFieldStyle(.roundedBorder)
                     .onSubmit(commitServerURL)
             } header: {
@@ -107,6 +107,30 @@ private struct GeneralTab: View {
             }
 
             Section {
+                HStack(spacing: 12) {
+                    Slider(
+                        value: Binding(
+                            get: { Double(settings.audioRetentionCount) },
+                            set: { settings.audioRetentionCount = Int($0.rounded()) }
+                        ),
+                        in: 0...50,
+                        step: 1
+                    )
+                    Text(retentionLabel)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 70, alignment: .trailing)
+                        .monospacedDigit()
+                }
+            } header: {
+                Text("Audio retention")
+            } footer: {
+                Text(retentionFooter)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
                 Toggle("Launch at login", isOn: Binding(
                     get: { launchAtLogin },
                     set: { toggleLaunchAtLogin($0) }
@@ -159,6 +183,21 @@ private struct GeneralTab: View {
                 .foregroundStyle(.orange)
                 .font(.system(size: 11, weight: .semibold))
         }
+    }
+
+    private var retentionLabel: String {
+        let n = settings.audioRetentionCount
+        if n == 0 { return "Off" }
+        if n == 1 { return "1 file" }
+        return "\(n) files"
+    }
+
+    private var retentionFooter: String {
+        let n = settings.audioRetentionCount
+        if n == 0 {
+            return "Delete each recording from disk as soon as it's uploaded. Transcripts are still kept on the server."
+        }
+        return "Keep the most recent \(n) uploaded recording\(n == 1 ? "" : "s") on disk; older ones are deleted automatically. Transcripts are kept on the server regardless."
     }
 
     private func loadDrafts() {
