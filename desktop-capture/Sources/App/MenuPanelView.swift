@@ -11,6 +11,7 @@ struct MenuPanelView: View {
     @ObservedObject private var settings = SettingsStore.shared
     @ObservedObject private var recorder = AudioRecorder.shared
     @ObservedObject private var pipeline = CapturePipeline.shared
+    @ObservedObject private var ocr = OCRRescue.shared
     @State private var pendingCount: Int = 0
     @State private var pendingAudioCount: Int = 0
     @State private var recentAudio: [LocalAudio] = []
@@ -105,6 +106,7 @@ struct MenuPanelView: View {
                 recordButton
                 if settings.hasToken && axTrusted {
                     pauseButton
+                    ocrButton
                 }
                 if settings.hasToken {
                     Button("Test connection", action: onTest)
@@ -119,6 +121,18 @@ struct MenuPanelView: View {
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                 Spacer()
+            }
+            if let status = ocr.lastStatus {
+                Label(status, systemImage: "text.viewfinder")
+                    .foregroundStyle(.secondary)
+                    .font(.system(size: 11))
+                    .padding(.top, 2)
+            }
+            if let err = ocr.lastError {
+                Label(err, systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.red)
+                    .font(.system(size: 11))
+                    .padding(.top, 2)
             }
             if let err = recorder.lastError {
                 Label(err, systemImage: "exclamationmark.triangle.fill")
@@ -147,6 +161,30 @@ struct MenuPanelView: View {
             .buttonStyle(.bordered)
             .controlSize(.small)
         }
+    }
+
+    @ViewBuilder
+    private var ocrButton: some View {
+        Button(action: triggerOCR) {
+            if ocr.isRunning {
+                Label("OCR…", systemImage: "text.viewfinder")
+            } else {
+                Label("OCR window", systemImage: "text.viewfinder")
+            }
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .disabled(ocr.isRunning)
+        .help("Screenshot + OCR the focused window — rescue text from AX-blind apps like WeChat / Feishu. On-device, one-shot.")
+    }
+
+    private func triggerOCR() {
+        // Fire-and-forget; OCRRescue surfaces status via @Published props
+        // that this view already observes, so there's nothing to await here.
+        // The popover will close from the outside-click monitor once the
+        // user clicks into the target window, which is what we want — the
+        // captured screenshot shouldn't include our own popover.
+        OCRRescue.shared.rescueFocusedWindow()
     }
 
     @ViewBuilder

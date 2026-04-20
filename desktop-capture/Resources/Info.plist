@@ -35,7 +35,7 @@
 	<string>PageFly Capture uses your microphone only when you start a recording, to capture your voice during meetings for later transcription on your server.
 </string>
 	<key>NSScreenCaptureUsageDescription</key>
-	<string>PageFly Capture taps system audio via ScreenCaptureKit only when you start a recording, to include the other side of your meetings in the transcription. No screenshots are taken.
+	<string>PageFly Capture uses screen capture for two opt-in features: (1) system-audio tap via ScreenCaptureKit while recording a meeting, (2) the "OCR this window" button, which takes a single screenshot of the currently focused window and runs local on-device text recognition to rescue content from AX-blind apps (WeChat, Feishu, etc.). Both are user-triggered — no automatic screenshots.
 </string>
 </dict>
 </plist>
