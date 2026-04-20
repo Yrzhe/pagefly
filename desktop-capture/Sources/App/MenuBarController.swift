@@ -20,6 +20,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         case offline
         case checking
         case armed
+        case paused
         case recording
     }
 
@@ -123,6 +124,13 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in self?.refreshState() }
             .store(in: &cancellables)
+
+        // Reflect user-invoked pause in the menu bar tint immediately
+        // instead of waiting for the next connection-state event.
+        CapturePipeline.shared.$isPausedByUser
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.refreshState() }
+            .store(in: &cancellables)
     }
 
     // MARK: - State → UI
@@ -138,6 +146,9 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         if AudioRecorder.shared.isRecording { return .recording }
         if !SettingsStore.shared.hasToken { return .noConfig }
         if !AXTrustMonitor.shared.isTrusted { return .noPermission }
+        // User pause takes precedence over connection state so the icon
+        // stops looking "armed green" while captures are off.
+        if CapturePipeline.shared.isPausedByUser { return .paused }
         switch SettingsStore.shared.connectionState {
         case .connected: return .armed
         case .checking: return .checking
@@ -194,6 +205,8 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
             return (.labelColor, "PageFly Capture — checking connection")
         case .armed:
             return (.systemGreen, "PageFly Capture — armed")
+        case .paused:
+            return (.systemYellow, "PageFly Capture — paused (click to resume)")
         case .recording:
             return (.systemRed, "PageFly Capture — recording")
         }

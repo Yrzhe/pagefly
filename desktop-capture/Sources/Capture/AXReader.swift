@@ -6,23 +6,60 @@ import ApplicationServices
 /// frontmost (rare).
 ///
 /// Text strategy:
-///   1. Grab the focused element's `AXValue` / `AXSelectedText` first — that's
+///   1. Poke the app element with the Chromium/WebKit "screen reader is
+///      active" flags so Electron/browser apps materialize their full AX
+///      tree. Cached per-pid to avoid paying the tree rebuild every poll.
+///   2. Grab the focused element's `AXValue` / `AXSelectedText` first — that's
 ///      the highest-signal source (what the user is actively typing/selecting).
-///   2. Walk the focused *window* with a bounded budget to harvest visible
-///      text + an `AXURL` from any `AXWebArea` descendant. The walk is
-///      capped on depth, node count, and per-element messaging timeout so a
-///      huge browser DOM never stalls the capture loop on the main thread.
-///   3. The persisted `textExcerpt` prefers the focused-element text when
+///   3. Walk the focused *window* with a bounded budget (node count, depth,
+///      *and* wall-clock) to harvest visible text + an `AXURL` from any
+///      `AXWebArea` descendant. Decorative roles are skipped entirely.
+///   4. The persisted `textExcerpt` prefers the focused-element text when
 ///      present; otherwise it falls back to the harvested window text.
 enum AXReader {
     // Walk budgets — tuned for "responsive enough on a Comet/Chrome window
-    // with a real page loaded". Bigger DOMs simply truncate.
-    private static let maxTextChars = 1500
-    private static let maxNodes = 400
-    private static let maxDepth = 12
+    // with a real page loaded, but rich enough that Electron apps (Slack,
+    // Cursor, Notion, Discord) actually yield their content instead of
+    // running out of node budget on chrome before reaching the pane".
+    // Bigger DOMs simply truncate.
+    private static let maxTextChars = 4000
+    private static let maxNodes = 1500
+    private static let maxDepth = 20
     /// Per-element AX messaging timeout. Default is ~6s, which is way too
     /// long for our 5-10s capture cadence.
-    private static let messagingTimeoutSeconds: Float = 0.4
+    private static let messagingTimeoutSeconds: Float = 0.3
+    /// Total wall-clock budget for the window walk. A pathological slow app
+    /// could otherwise burn `maxNodes × messagingTimeoutSeconds` seconds on
+    /// the main thread. Screenpipe's equivalent default is 250ms — we give
+    /// ourselves a little more headroom.
+    private static let walkBudgetSeconds: CFTimeInterval = 0.3
+
+    /// Decorative AX roles whose subtrees never contain content the user
+    /// would want logged. Skipping these frees node budget for the real
+    /// content pane in Electron/Chromium apps that spam the AX tree with
+    /// scrollbars, images, toolbars, and progress indicators. Derived from
+    /// Screenpipe's `macos.rs` (crates/screenpipe-a11y).
+    private static let decorativeRoles: Set<String> = [
+        "AXScrollBar",
+        "AXImage",
+        "AXSplitter",
+        "AXGrowArea",
+        "AXMenuBar",
+        "AXMenu",
+        "AXToolbar",
+        "AXRuler",
+        "AXBusyIndicator",
+        "AXProgressIndicator",
+        "AXLayoutItem",
+    ]
+
+    /// Per-pid TTL for the "enhanced UI" flag poke. Chromium-based apps
+    /// materialize their full AX tree when they see `AXEnhancedUserInterface`
+    /// go true, but rebuilding that tree is expensive, so we only poke once
+    /// every few minutes per pid. The flag stays on between pokes; the TTL
+    /// is just "don't re-set it every sample".
+    private static let enhanceTTL: TimeInterval = 180
+    private static var enhancedAt: [pid_t: Date] = [:]
 
     static func currentSnapshot() -> ContextSnapshot? {
         guard let app = NSWorkspace.shared.frontmostApplication else {
@@ -34,6 +71,7 @@ enum AXReader {
         let pid = app.processIdentifier
         let axApp = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(axApp, messagingTimeoutSeconds)
+        enhanceChromiumIfNeeded(axApp: axApp, pid: pid)
 
         let window = copyElement(axApp, kAXFocusedWindowAttribute)
         let title = window.flatMap { copyString($0, kAXTitleAttribute) } ?? ""
@@ -52,8 +90,15 @@ enum AXReader {
         var harvested = ""
         if let w = window {
             AXUIElementSetMessagingTimeout(w, messagingTimeoutSeconds)
+            // Try the Safari/Chrome/Edge fast path: the window itself exposes
+            // `AXDocument` (a URL string) without having to descend into the
+            // web tree at all. Saves hundreds of nodes on browser windows.
+            if let docURL = copyString(w, "AXDocument") {
+                url = docURL
+            }
             var collector = TextCollector(limit: maxTextChars, nodeBudget: maxNodes)
-            walk(w, depth: 0, collector: &collector, urlOut: &url)
+            let deadline = CFAbsoluteTimeGetCurrent() + walkBudgetSeconds
+            walk(w, depth: 0, collector: &collector, urlOut: &url, deadline: deadline)
             harvested = collector.text
         }
 
@@ -79,6 +124,30 @@ enum AXReader {
         let key = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
         let options = [key: prompt] as CFDictionary
         return AXIsProcessTrustedWithOptions(options)
+    }
+
+    // MARK: - Chromium / WebKit tree materialization
+
+    /// The single biggest lever for Electron and WebKit-backed apps. Without
+    /// these flags Chromium returns a stripped AX tree with ~none of the
+    /// content; with them the full tree materializes. Refs:
+    ///   - Chromium codereview.chromium.org/6909013
+    ///   - electron/electron#7206
+    ///   - obsidianmd/obsidian-releases#3002 (needs AXManualAccessibility)
+    /// Safe to call on non-Chromium apps — they ignore unknown attributes.
+    private static func enhanceChromiumIfNeeded(axApp: AXUIElement, pid: pid_t) {
+        let now = Date()
+        if let last = enhancedAt[pid], now.timeIntervalSince(last) < enhanceTTL {
+            return
+        }
+        enhancedAt[pid] = now
+        setBool(axApp, "AXEnhancedUserInterface", true)
+        setBool(axApp, "AXManualAccessibility", true)
+    }
+
+    private static func setBool(_ element: AXUIElement, _ attribute: String, _ value: Bool) {
+        let cfValue = value as CFBoolean
+        _ = AXUIElementSetAttributeValue(element, attribute as CFString, cfValue)
     }
 
     // MARK: - Tree walk
@@ -118,18 +187,24 @@ enum AXReader {
         _ element: AXUIElement,
         depth: Int,
         collector: inout TextCollector,
-        urlOut: inout String
+        urlOut: inout String,
+        deadline: CFAbsoluteTime
     ) {
         if collector.done || depth > maxDepth { return }
+        if CFAbsoluteTimeGetCurrent() > deadline { return }
         collector.consumeNode()
 
         let role = copyString(element, kAXRoleAttribute) ?? ""
         // Don't descend into masked password fields, even structurally —
         // their value is already nil but the role itself signals intent.
         if PrivacyFilter.blockedAXRoles.contains(role) { return }
+        // Decorative subtrees: skip the whole branch, don't just skip this
+        // node. Their descendants are also noise.
+        if decorativeRoles.contains(role) { return }
 
         // URL — most browsers expose AXWebArea with kAXURLAttribute. Only
-        // keep the first one we find; nested iframes can spam.
+        // keep the first one we find; nested iframes can spam. Cheaper
+        // `AXDocument` on the window is tried before the walk even starts.
         if urlOut.isEmpty, role == "AXWebArea" {
             if let s = copyURLString(element, kAXURLAttribute) {
                 urlOut = s
@@ -137,20 +212,30 @@ enum AXReader {
         }
 
         // Text — value is the most authoritative; fall back to title and
-        // description for elements that label themselves textually.
+        // description for elements that label themselves textually. On text
+        // elements that expose selected text (many Electron editors do)
+        // that's often the only non-empty string they hand back.
         if let v = copyString(element, kAXValueAttribute) {
             collector.add(v)
         } else if let t = copyString(element, kAXTitleAttribute) {
             collector.add(t)
+        } else if let sel = copyString(element, kAXSelectedTextAttribute) {
+            collector.add(sel)
         }
         if let d = copyString(element, kAXDescriptionAttribute) {
             collector.add(d)
         }
 
+        // Always use kAXChildrenAttribute. The prior kAXVisibleChildrenAttribute
+        // pre-fetch cost an extra IPC round-trip per element and Electron apps
+        // routinely return [] for visible children even when the content IS
+        // visible, so it was net-negative. Screenpipe also walks children
+        // directly.
         guard let kids = copyChildren(element) else { return }
         for child in kids {
             if collector.done { return }
-            walk(child, depth: depth + 1, collector: &collector, urlOut: &urlOut)
+            if CFAbsoluteTimeGetCurrent() > deadline { return }
+            walk(child, depth: depth + 1, collector: &collector, urlOut: &urlOut, deadline: deadline)
         }
     }
 
@@ -187,7 +272,8 @@ enum AXReader {
         let status = AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &value)
         guard status == .success, let value else { return nil }
         guard CFGetTypeID(value) == CFArrayGetTypeID() else { return nil }
-        return (value as! [AXUIElement])
+        let arr = value as! [AXUIElement]
+        return arr.isEmpty ? nil : arr
     }
 
     /// Pull text from a focused element. Skips secure fields outright.

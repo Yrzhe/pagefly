@@ -10,10 +10,17 @@ import Combine
 /// Started/stopped externally via `start()` / `stop()`. AppDelegate boots it
 /// when SettingsStore has a token.
 @MainActor
-final class CapturePipeline {
+final class CapturePipeline: ObservableObject {
     static let shared = CapturePipeline()
 
     private(set) var isRunning = false
+
+    /// User-initiated pause. Distinct from `pausedForIdle` (which comes
+    /// from the idle monitor and auto-resumes on any input). This one
+    /// only flips via explicit menu action and is intentionally
+    /// non-persistent across relaunches so a user can't accidentally
+    /// leave captures off for days.
+    @Published private(set) var isPausedByUser: Bool = false
 
     private let dedup: ContextDedup
     private let privacy: PrivacyFilter
@@ -58,6 +65,23 @@ final class CapturePipeline {
         removeObservers()
         dedup.flush(at: Date())
         logCapture(.info, "Capture pipeline stopped (\(reason)).")
+    }
+
+    /// User-invoked pause/resume from the menu. The pipeline itself stays
+    /// "running" so we keep workspace observers registered and the timer
+    /// scheduled — sampleNow just short-circuits while paused. This keeps
+    /// resume instant (no observer re-install) and means we still close
+    /// the open row cleanly on pause.
+    func setPausedByUser(_ paused: Bool) {
+        guard paused != isPausedByUser else { return }
+        isPausedByUser = paused
+        if paused {
+            dedup.flush(at: Date())
+            logCapture(.info, "Capture paused by user.")
+        } else {
+            logCapture(.info, "Capture resumed by user.")
+            sampleNow(reason: "resume")
+        }
     }
 
     // MARK: - Observers
@@ -110,6 +134,7 @@ final class CapturePipeline {
 
     private func sampleNow(reason: String) {
         guard isRunning else { return }
+        if isPausedByUser { return }
 
         if idle.isIdle {
             if !pausedForIdle {

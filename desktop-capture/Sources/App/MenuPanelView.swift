@@ -10,6 +10,7 @@ struct MenuPanelView: View {
 
     @ObservedObject private var settings = SettingsStore.shared
     @ObservedObject private var recorder = AudioRecorder.shared
+    @ObservedObject private var pipeline = CapturePipeline.shared
     @State private var pendingCount: Int = 0
     @State private var pendingAudioCount: Int = 0
     @State private var recentAudio: [LocalAudio] = []
@@ -102,6 +103,9 @@ struct MenuPanelView: View {
                 .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 8) {
                 recordButton
+                if settings.hasToken && axTrusted {
+                    pauseButton
+                }
                 if settings.hasToken {
                     Button("Test connection", action: onTest)
                         .buttonStyle(.bordered)
@@ -145,6 +149,26 @@ struct MenuPanelView: View {
         }
     }
 
+    @ViewBuilder
+    private var pauseButton: some View {
+        if pipeline.isPausedByUser {
+            Button(action: { pipeline.setPausedByUser(false) }) {
+                Label("Resume capture", systemImage: "play.fill")
+                    .foregroundStyle(.green)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .help("Resume capturing window activity")
+        } else {
+            Button(action: { pipeline.setPausedByUser(true) }) {
+                Label("Pause", systemImage: "pause.fill")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .help("Stop capturing until you resume. Does not affect audio recording.")
+        }
+    }
+
     private var footer: some View {
         HStack {
             Button(action: onOpenPreferences) {
@@ -164,6 +188,7 @@ struct MenuPanelView: View {
     private var statusColor: Color {
         if recorder.isRecording { return .red }
         if settings.hasToken && !axTrusted { return .orange }
+        if pipeline.isPausedByUser { return .yellow }
         switch settings.connectionState {
         case .connected: return .green
         case .checking: return .secondary
@@ -175,6 +200,7 @@ struct MenuPanelView: View {
     private var headerSubtitle: String {
         if recorder.isRecording { return "Recording in progress" }
         if settings.hasToken && !axTrusted { return "Permission needed" }
+        if pipeline.isPausedByUser { return "Paused" }
         switch settings.connectionState {
         case .connected: return "Capturing"
         case .checking: return "Testing connection…"
@@ -208,6 +234,10 @@ struct MenuPanelView: View {
         }
         if !axTrusted {
             return "Grant Accessibility access in System Settings → Privacy & Security so PageFly can read which app and window you're focused on."
+        }
+        if pipeline.isPausedByUser {
+            let queued = "\(pendingCount) event\(pendingCount == 1 ? "" : "s") still queued"
+            return "Capture is paused. Nothing is being recorded. \(queued) — upload continues in the background. Hit Resume when you're ready."
         }
         switch settings.connectionState {
         case .connected:

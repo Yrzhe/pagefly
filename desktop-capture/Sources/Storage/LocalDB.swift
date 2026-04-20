@@ -408,9 +408,18 @@ final class LocalDB {
     /// server, and rendering a 5k-row LazyVStack still costs real memory.
     func fetchRecentEvents(limit: Int, offset: Int = 0) throws -> [LocalEvent] {
         try dbQueue.read { db in
+            // Tie-break by started_at DESC, then created_at DESC. Without
+            // this, the few-millisecond window where a just-closed row's
+            // final ended_at equals (or narrowly exceeds) a brand-new
+            // live row's started_at would put the older row above the
+            // newer one — that's the "row 1 is sometimes newer than row 0"
+            // glitch users saw on rapid app switches.
             try LocalEvent.fetchAll(db, sql: """
                 SELECT * FROM local_events
-                ORDER BY COALESCE(ended_at, started_at) DESC
+                ORDER BY
+                    COALESCE(ended_at, started_at) DESC,
+                    started_at DESC,
+                    created_at DESC
                 LIMIT ? OFFSET ?
                 """, arguments: [limit, offset])
         }

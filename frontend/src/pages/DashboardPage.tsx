@@ -547,33 +547,21 @@ function PendingDayCard({ day, onOpenWiki, onViewAll }: { day: PendingDay; onOpe
                 <div className="flex flex-col gap-1 mt-1">
                   <div className="flex items-center justify-between">
                     <span className="text-[9px] font-semibold uppercase tracking-wider text-text-tertiary">Recent rows</span>
-                    {day.event_count > day.samples.length && (
+                    {day.event_count > 0 && (
                       <button
                         type="button"
                         onClick={(e) => { e.stopPropagation(); onViewAll() }}
                         className="text-[10px] text-accent-primary hover:underline inline-flex items-center gap-0.5"
                       >
-                        View all {day.event_count} events <ArrowRight size={9} />
+                        {day.event_count > day.samples.length
+                          ? `View all ${day.event_count} events`
+                          : 'Open in full view'}
+                        <ArrowRight size={9} />
                       </button>
                     )}
                   </div>
                   {day.samples.map((s, i) => (
-                    <div key={`${day.date}-${i}`} className="flex items-start gap-2 text-[10px] py-1 border-b border-border last:border-0">
-                      <span className="font-mono text-text-tertiary flex-shrink-0">{s.started_at.slice(11, 16)}</span>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-1.5">
-                          <span className="font-semibold text-text-primary truncate">{s.app}</span>
-                          {s.window_title && (
-                            <>
-                              <span className="text-text-tertiary">·</span>
-                              <span className="text-text-secondary truncate">{s.window_title}</span>
-                            </>
-                          )}
-                        </div>
-                        {s.url && <div className="text-text-tertiary truncate">{s.url}</div>}
-                        {s.text_excerpt && <div className="text-text-secondary mt-0.5 line-clamp-2">{s.text_excerpt}</div>}
-                      </div>
-                    </div>
+                    <InlineSampleRow key={`${day.date}-${i}`} sample={s} />
                   ))}
                 </div>
               )}
@@ -587,6 +575,69 @@ function PendingDayCard({ day, onOpenWiki, onViewAll }: { day: PendingDay; onOpe
                 </button>
               )}
             </>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function InlineSampleRow({ sample }: { sample: PendingSample }) {
+  // Mirrors DetailRow in the modal but scoped to the PendingSample shape
+  // (no ax_role / audio_id / local_uuid — the server doesn't return those
+  // on the pending summary endpoint to keep the payload small). Click the
+  // row to expand; small days never hit the modal path so this is the
+  // only way to read full content on a day with ≤ samples total events.
+  const [expanded, setExpanded] = useState(false)
+  const hasMore = (sample.text_excerpt && sample.text_excerpt.length > 80) || !!sample.url
+  return (
+    <div className="border-b border-border last:border-0">
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); setExpanded(v => !v) }}
+        className="w-full flex items-start gap-2 text-[10px] py-1 text-left hover:bg-bg-secondary/60 transition-colors rounded-sm"
+      >
+        <span className="font-mono text-text-tertiary flex-shrink-0">{sample.started_at.slice(11, 16)}</span>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1.5">
+            <span className="font-semibold text-text-primary truncate">{sample.app}</span>
+            {sample.window_title && (
+              <>
+                <span className="text-text-tertiary">·</span>
+                <span className="text-text-secondary truncate">{sample.window_title}</span>
+              </>
+            )}
+          </div>
+          {!expanded && sample.url && <div className="text-text-tertiary truncate">{sample.url}</div>}
+          {!expanded && sample.text_excerpt && (
+            <div className="text-text-secondary mt-0.5 line-clamp-2">{sample.text_excerpt}</div>
+          )}
+        </div>
+        {hasMore && (
+          expanded
+            ? <ChevronDown size={10} className="text-text-tertiary flex-shrink-0 mt-0.5" />
+            : <ChevronRight size={10} className="text-text-tertiary flex-shrink-0 mt-0.5" />
+        )}
+      </button>
+      {expanded && (
+        <div className="pl-[52px] pr-2 pb-2 flex flex-col gap-1.5 bg-bg-secondary/30 rounded-b">
+          {sample.url && (
+            <a
+              href={sample.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-[10px] text-accent-primary hover:underline inline-flex items-center gap-1 break-all"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {sample.url} <ExternalLink size={8} className="flex-shrink-0" />
+            </a>
+          )}
+          {sample.text_excerpt ? (
+            <pre className="text-[10px] text-text-primary whitespace-pre-wrap font-sans bg-bg-primary border border-border rounded p-2 max-h-[240px] overflow-y-auto">
+              {sample.text_excerpt}
+            </pre>
+          ) : (
+            <span className="text-[10px] text-text-tertiary italic">No text captured for this row.</span>
           )}
         </div>
       )}
