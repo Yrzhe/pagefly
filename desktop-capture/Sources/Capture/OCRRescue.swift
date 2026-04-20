@@ -22,6 +22,23 @@ final class OCRRescue: ObservableObject {
     @Published private(set) var lastStatus: String?
     @Published private(set) var lastError: String?
 
+    /// How long to wait before OCR-ing the same app again in auto mode.
+    /// 5 minutes gives ~0.07% average CPU on a persistent chat app, well
+    /// below the ~15% budget of continuous OCR (rem/screenpipe-style).
+    private static let autoTTL: TimeInterval = 300
+    /// When set, auto mode backs off further (e.g. after a permission
+    /// failure). Avoids flooding the logs with the same "no Screen
+    /// Recording TCC" error every 5 minutes.
+    private static let autoBackoffAfterError: TimeInterval = 30 * 60
+
+    /// Per-bundle timestamp of the last auto-OCR attempt. Manual mode
+    /// ignores this map entirely so the user's button press is never
+    /// throttled.
+    private var autoLastAt: [String: Date] = [:]
+    /// Permission-failure backoff per bundle — bumps `autoLastAt` out
+    /// into the future so the next retry waits `autoBackoffAfterError`.
+    private var autoErrorMuteUntil: Date?
+
     private let isoFormatter: ISO8601DateFormatter
     private var clearTask: Task<Void, Never>?
 
@@ -35,40 +52,85 @@ final class OCRRescue: ObservableObject {
     /// new `local_events` row. Designed to be called from a menu action;
     /// popover-close timing is the caller's problem.
     func rescueFocusedWindow() {
+        run(mode: .manual)
+    }
+
+    /// Auto mode — called by CapturePipeline when the AX snapshot came
+    /// back empty. Throttled per-bundle via `autoTTL`; silent on success
+    /// (no popover status) and mute-backoff on permission failures so
+    /// logs aren't spammed every 5 min. Manual mode is unaffected by the
+    /// throttle state.
+    func autoRescueIfEligible(bundleID: String) {
+        guard !isRunning else { return }
+        guard !bundleID.isEmpty else { return }
+        if let muteUntil = autoErrorMuteUntil, Date() < muteUntil { return }
+        if let last = autoLastAt[bundleID.lowercased()],
+           Date().timeIntervalSince(last) < Self.autoTTL {
+            return
+        }
+        autoLastAt[bundleID.lowercased()] = Date()
+        run(mode: .auto)
+    }
+
+    // MARK: - Runner
+
+    private enum Mode { case manual, auto }
+
+    private func run(mode: Mode) {
         guard !isRunning else { return }
         isRunning = true
-        lastError = nil
-        lastStatus = "Capturing…"
+        if mode == .manual {
+            lastError = nil
+            lastStatus = "Capturing…"
+        }
 
         Task { [weak self] in
             guard let self else { return }
             defer { Task { @MainActor in self.isRunning = false } }
             do {
-                // Give the popover ~250ms to finish closing. Without this
-                // the screenshot still captures the popover's content area
-                // and OCRs the menu text instead of the app.
-                try? await Task.sleep(nanoseconds: 250_000_000)
+                if mode == .manual {
+                    // Give the popover ~250ms to finish closing. Without
+                    // this the screenshot captures the popover's content
+                    // area and OCRs the menu text instead of the app.
+                    try? await Task.sleep(nanoseconds: 250_000_000)
+                }
 
                 let result = try await WindowOCR.captureAndRecognize()
                 try await self.persist(result)
 
-                await MainActor.run {
-                    if result.lineCount == 0 {
-                        self.lastStatus = "OCR found no text. Window may be blank or all-image."
-                    } else {
-                        self.lastStatus = "OCR captured \(result.lineCount) line\(result.lineCount == 1 ? "" : "s") from \(result.app)."
+                if mode == .manual {
+                    await MainActor.run {
+                        if result.lineCount == 0 {
+                            self.lastStatus = "OCR found no text. Window may be blank or all-image."
+                        } else {
+                            self.lastStatus = "OCR captured \(result.lineCount) line\(result.lineCount == 1 ? "" : "s") from \(result.app)."
+                        }
+                        Uploader.shared.kick()
                     }
-                    Uploader.shared.kick()
+                    self.scheduleStatusClear()
+                } else {
+                    // Auto mode logs instead of nagging the popover.
+                    logCapture(.info, "Auto OCR (\(result.bundleID)) → \(result.lineCount) line(s)")
+                    await MainActor.run { Uploader.shared.kick() }
                 }
-                self.scheduleStatusClear()
             } catch {
-                logCapture(.error, "OCR rescue failed: \(error)")
-                await MainActor.run {
-                    self.lastError = (error as? LocalizedError)?.errorDescription
-                        ?? error.localizedDescription
-                    self.lastStatus = nil
+                logCapture(mode == .manual ? .error : .warn,
+                           "\(mode == .manual ? "Manual" : "Auto") OCR failed: \(error)")
+                if mode == .manual {
+                    await MainActor.run {
+                        self.lastError = (error as? LocalizedError)?.errorDescription
+                            ?? error.localizedDescription
+                        self.lastStatus = nil
+                    }
+                    self.scheduleStatusClear()
+                } else {
+                    // Likely Screen Recording permission or similar system
+                    // issue — back off so we don't retry every tick and
+                    // fill the logs with the same error.
+                    await MainActor.run {
+                        self.autoErrorMuteUntil = Date().addingTimeInterval(Self.autoBackoffAfterError)
+                    }
                 }
-                self.scheduleStatusClear()
             }
         }
     }

@@ -158,6 +158,17 @@ final class CapturePipeline: ObservableObject {
             return
         }
         dedup.ingest(clean)
+
+        // Auto-OCR rescue for AX-blind apps. When AX returns nothing
+        // useful (empty text AND empty URL — typical of Skia/custom-render
+        // apps like WeChat 4.x, Feishu, DingTalk, Figma desktop, most
+        // games), fire a throttled one-shot OCR so the timeline isn't just
+        // "微信 · 16m · (no text)". OCRRescue.autoRescueIfEligible is a
+        // no-op if the per-bundle TTL hasn't elapsed, so the cost in the
+        // common case is one dictionary lookup.
+        if clean.textExcerpt.isEmpty && clean.url.isEmpty && !clean.bundleID.isEmpty {
+            OCRRescue.shared.autoRescueIfEligible(bundleID: clean.bundleID)
+        }
     }
 
     private func flushOnSleep() {
