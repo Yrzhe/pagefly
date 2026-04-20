@@ -53,6 +53,30 @@ enum AXReader {
         "AXLayoutItem",
     ]
 
+    /// Roles that actually carry user-visible content. Collecting text
+    /// ONLY from these (instead of every node) cuts noise dramatically:
+    /// container `AXTitle` / `AXDescription` strings often duplicate their
+    /// children's labels ("Memory usage - 186 MB" in every tab cell,
+    /// "Close" on every sidebar row, etc.). Screenpipe uses the same
+    /// allowlist. Everything else still gets walked (so we descend through
+    /// `AXGroup`, `AXWebArea`, etc. to reach these leaves), we just don't
+    /// harvest text *from* the container nodes.
+    private static let contentRoles: Set<String> = [
+        "AXStaticText",
+        "AXTextField",
+        "AXTextArea",
+        "AXButton",
+        "AXMenuItem",
+        "AXCell",
+        "AXHeading",
+        "AXLink",
+        "AXPopUpButton",
+        "AXComboBox",
+        "AXCheckBox",
+        "AXRadioButton",
+        "AXTab",
+    ]
+
     /// Per-pid TTL for the "enhanced UI" flag poke. Chromium-based apps
     /// materialize their full AX tree when they see `AXEnhancedUserInterface`
     /// go true, but rebuilding that tree is expensive, so we only poke once
@@ -152,13 +176,20 @@ enum AXReader {
 
     // MARK: - Tree walk
 
-    /// Bounded text accumulator. Stops once `limit` chars or `nodeBudget`
-    /// elements have been consumed so a 50k-node browser DOM can't stall us.
+    /// Bounded text accumulator with duplicate suppression. Stops once
+    /// `limit` chars or `nodeBudget` elements have been consumed so a
+    /// 50k-node browser DOM can't stall us.
+    ///
+    /// The `seen` set catches the "same label repeated across every row
+    /// of a list" problem — e.g. every Comet tab cell has a "Close" button
+    /// and a "Memory usage" `AXDescription`, and without dedup we collect
+    /// ~30 copies before running out of budget.
     private struct TextCollector {
         let limit: Int
         var nodeBudget: Int
         private var pieces: [String] = []
         private var charCount = 0
+        private var seen: Set<String> = []
 
         init(limit: Int, nodeBudget: Int) {
             self.limit = limit
@@ -173,12 +204,20 @@ enum AXReader {
         mutating func add(_ s: String?) {
             guard let raw = s else { return }
             let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-            // Skip the noise: single-char labels, glyphs, empty strings.
+            // Skip noise: single-char labels, glyphs, empty strings, and
+            // strings we've already recorded this walk (dedup).
             guard trimmed.count > 1 else { return }
+            if seen.contains(trimmed) { return }
             let remaining = limit - charCount
             if remaining <= 0 { return }
             let slice = trimmed.count <= remaining ? trimmed : String(trimmed.prefix(remaining))
             pieces.append(slice)
+            // Only dedup by full original string — partial slices of long
+            // text shouldn't block a future verbatim repeat. Cap the seen
+            // set size to bound memory on huge trees.
+            if seen.count < 2000 {
+                seen.insert(trimmed)
+            }
             charCount += slice.count
         }
     }
@@ -211,19 +250,25 @@ enum AXReader {
             }
         }
 
-        // Text — value is the most authoritative; fall back to title and
-        // description for elements that label themselves textually. On text
-        // elements that expose selected text (many Electron editors do)
-        // that's often the only non-empty string they hand back.
-        if let v = copyString(element, kAXValueAttribute) {
-            collector.add(v)
-        } else if let t = copyString(element, kAXTitleAttribute) {
-            collector.add(t)
-        } else if let sel = copyString(element, kAXSelectedTextAttribute) {
-            collector.add(sel)
-        }
-        if let d = copyString(element, kAXDescriptionAttribute) {
-            collector.add(d)
+        // Text — only harvest from content-bearing roles. Container roles
+        // like AXGroup / AXWebArea / AXSplitGroup often carry AXTitle /
+        // AXDescription strings that duplicate their children's labels,
+        // which dominates the collected text with noise. The walk still
+        // descends through these roles — we just don't collect text *from*
+        // them. For text-leaf roles, AXValue is the most authoritative;
+        // fall back to AXTitle and then AXSelectedText (many Electron
+        // editors only expose text via the current selection).
+        if contentRoles.contains(role) {
+            if let v = copyString(element, kAXValueAttribute) {
+                collector.add(v)
+            } else if let t = copyString(element, kAXTitleAttribute) {
+                collector.add(t)
+            } else if let sel = copyString(element, kAXSelectedTextAttribute) {
+                collector.add(sel)
+            }
+            if let d = copyString(element, kAXDescriptionAttribute) {
+                collector.add(d)
+            }
         }
 
         // Always use kAXChildrenAttribute. The prior kAXVisibleChildrenAttribute

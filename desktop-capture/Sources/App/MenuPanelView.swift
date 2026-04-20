@@ -102,25 +102,42 @@ struct MenuPanelView: View {
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            HStack(spacing: 8) {
-                recordButton
-                if settings.hasToken && axTrusted {
-                    pauseButton
-                    ocrButton
+            // Two-row button layout. Row 1: capture controls (what's
+            // happening right now). Row 2: admin / navigation. Keeps
+            // labels legible in a 360pt-wide popover — one-row packing
+            // with 5-6 bordered buttons truncated to "Rec…", "P…",
+            // "OCR…", "Test…", "Dash…", "Prefe…".
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    recordButton
+                    if settings.hasToken && axTrusted {
+                        pauseButton
+                        ocrButton
+                    }
+                    Spacer()
                 }
                 if settings.hasToken {
-                    Button("Test connection", action: onTest)
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                        .disabled(settings.connectionState == .checking)
-                    Button("Dashboard…", action: onOpenDashboard)
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
+                    HStack(spacing: 8) {
+                        Button("Test connection", action: onTest)
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                            .disabled(settings.connectionState == .checking)
+                        Button("Dashboard…", action: onOpenDashboard)
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                        Button("Preferences…", action: onOpenPreferences)
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                        Spacer()
+                    }
+                } else {
+                    HStack {
+                        Button("Preferences…", action: onOpenPreferences)
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                        Spacer()
+                    }
                 }
-                Button("Preferences…", action: onOpenPreferences)
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                Spacer()
             }
             if let status = ocr.lastStatus {
                 Label(status, systemImage: "text.viewfinder")
