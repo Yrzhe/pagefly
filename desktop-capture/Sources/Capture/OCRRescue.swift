@@ -77,12 +77,16 @@ final class OCRRescue: ObservableObject {
     }
 
     /// Combine bundleID + URL (truncated to path) into a stable throttle
-    /// key. Falls back to bundleID alone for non-web apps.
+    /// key. Falls back to bundleID alone for non-web apps, and for
+    /// `file://` URLs — those typically point to a locally-bundled
+    /// WebView shell (e.g. Feishu's `file:///Applications/Lark.app/...`)
+    /// that varies per internal route in ways we can't meaningfully
+    /// distinguish, so per-URL throttling there just fires OCR
+    /// continuously for one document.
     private static func throttleKey(bundleID: String, url: String) -> String {
         let bundle = bundleID.lowercased()
         guard !url.isEmpty, let u = URL(string: url) else { return bundle }
-        // host + path, no query/fragment — avoids a per-query-string
-        // cache bust on SPA routes with auto-refreshing params.
+        if u.scheme == "file" { return bundle }
         let host = u.host ?? ""
         let path = u.path
         return "\(bundle)|\(host)\(path)"
