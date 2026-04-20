@@ -159,15 +159,26 @@ final class CapturePipeline: ObservableObject {
         }
         dedup.ingest(clean)
 
-        // Auto-OCR rescue for AX-blind apps. When AX returns nothing
-        // useful (empty text AND empty URL — typical of Skia/custom-render
-        // apps like WeChat 4.x, Feishu, DingTalk, Figma desktop, most
-        // games), fire a throttled one-shot OCR so the timeline isn't just
-        // "微信 · 16m · (no text)". OCRRescue.autoRescueIfEligible is a
-        // no-op if the per-bundle TTL hasn't elapsed, so the cost in the
-        // common case is one dictionary lookup.
-        if clean.textExcerpt.isEmpty && clean.url.isEmpty && !clean.bundleID.isEmpty {
-            OCRRescue.shared.autoRescueIfEligible(bundleID: clean.bundleID)
+        // Auto-OCR rescue — fires when AX yielded essentially nothing
+        // actionable, covering two distinct failure modes:
+        //
+        //   1. AX-blind apps (Skia / custom renderers): empty text + empty
+        //      URL. WeChat 4.x, Feishu desktop client, DingTalk, Figma
+        //      desktop, most games.
+        //   2. Canvas-rendered web pages: we have a URL (the browser
+        //      exposed one) but the page body is drawn on a <canvas> so
+        //      AX text is < ~40 chars of sidebar chrome. Feishu docs,
+        //      Google Docs' "canvas rendering" beta, Figma web, Linear's
+        //      editor. For these the URL alone is a poor work-log entry.
+        //
+        // OCRRescue.autoRescueIfEligible is a no-op if the per-bundle TTL
+        // (5min) hasn't elapsed, so the cost in the common case is one
+        // dictionary lookup.
+        let textIsThin = clean.textExcerpt.count < 40
+        let axBlind = textIsThin && clean.url.isEmpty
+        let canvasLikelyWeb = textIsThin && !clean.url.isEmpty
+        if (axBlind || canvasLikelyWeb) && !clean.bundleID.isEmpty {
+            OCRRescue.shared.autoRescueIfEligible(bundleID: clean.bundleID, url: clean.url)
         }
     }
 

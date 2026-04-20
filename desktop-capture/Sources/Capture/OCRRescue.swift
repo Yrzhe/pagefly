@@ -56,20 +56,36 @@ final class OCRRescue: ObservableObject {
     }
 
     /// Auto mode — called by CapturePipeline when the AX snapshot came
-    /// back empty. Throttled per-bundle via `autoTTL`; silent on success
-    /// (no popover status) and mute-backoff on permission failures so
-    /// logs aren't spammed every 5 min. Manual mode is unaffected by the
-    /// throttle state.
-    func autoRescueIfEligible(bundleID: String) {
+    /// back empty (or near-empty on a Canvas-rendered page). Throttle
+    /// key is `bundleID + URL` so a single browser process can OCR
+    /// multiple Canvas pages independently (one Feishu page shouldn't
+    /// lock out the next Feishu page for 5 min). Silent on success; on
+    /// permission-like failures, bumps a global mute so logs don't get
+    /// spammed. Manual mode is unaffected by throttle state.
+    func autoRescueIfEligible(bundleID: String, url: String = "") {
         guard !isRunning else { return }
         guard !bundleID.isEmpty else { return }
         if let muteUntil = autoErrorMuteUntil, Date() < muteUntil { return }
-        if let last = autoLastAt[bundleID.lowercased()],
-           Date().timeIntervalSince(last) < Self.autoTTL {
+        // Normalize URL to origin+path; query strings on SPA navigations
+        // shouldn't produce a new throttle bucket per keystroke.
+        let key = Self.throttleKey(bundleID: bundleID, url: url)
+        if let last = autoLastAt[key], Date().timeIntervalSince(last) < Self.autoTTL {
             return
         }
-        autoLastAt[bundleID.lowercased()] = Date()
+        autoLastAt[key] = Date()
         run(mode: .auto)
+    }
+
+    /// Combine bundleID + URL (truncated to path) into a stable throttle
+    /// key. Falls back to bundleID alone for non-web apps.
+    private static func throttleKey(bundleID: String, url: String) -> String {
+        let bundle = bundleID.lowercased()
+        guard !url.isEmpty, let u = URL(string: url) else { return bundle }
+        // host + path, no query/fragment — avoids a per-query-string
+        // cache bust on SPA routes with auto-refreshing params.
+        let host = u.host ?? ""
+        let path = u.path
+        return "\(bundle)|\(host)\(path)"
     }
 
     // MARK: - Runner

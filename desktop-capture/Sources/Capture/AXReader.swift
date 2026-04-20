@@ -120,9 +120,23 @@ enum AXReader {
             if let docURL = copyString(w, "AXDocument") {
                 url = docURL
             }
-            var collector = TextCollector(limit: maxTextChars, nodeBudget: maxNodes)
             let deadline = CFAbsoluteTimeGetCurrent() + walkBudgetSeconds
-            walk(w, depth: 0, collector: &collector, urlOut: &url, deadline: deadline)
+            // Browser mode: if the window has an AXWebArea descendant, only
+            // walk that subtree. Otherwise the tab strip / bookmarks bar /
+            // memory-usage labels dominate the 1500-node budget and the
+            // page content gets cut off. Chromium's tree is:
+            //   AXWindow → AXToolbar (tabs) → AXGroup → AXWebArea → page
+            // so we probe a few levels deep to find the web area before
+            // giving up and walking the whole window.
+            var collector = TextCollector(limit: maxTextChars, nodeBudget: maxNodes)
+            if let webArea = findWebArea(from: w, deadline: deadline) {
+                if url.isEmpty, let s = copyURLString(webArea, kAXURLAttribute) {
+                    url = s
+                }
+                walk(webArea, depth: 0, collector: &collector, urlOut: &url, deadline: deadline)
+            } else {
+                walk(w, depth: 0, collector: &collector, urlOut: &url, deadline: deadline)
+            }
             harvested = collector.text
         }
 
@@ -172,6 +186,29 @@ enum AXReader {
     private static func setBool(_ element: AXUIElement, _ attribute: String, _ value: Bool) {
         let cfValue = value as CFBoolean
         _ = AXUIElementSetAttributeValue(element, attribute as CFString, cfValue)
+    }
+
+    // MARK: - Browser shortcut
+
+    /// BFS the first ~80 elements under `root` looking for an `AXWebArea`.
+    /// Chromium puts the web area 3-4 levels deep (AXWindow → AXGroup →
+    /// AXTabGroup → AXWebArea), so a shallow BFS finds it fast without
+    /// spending the main walk budget. Returns nil on non-browser windows.
+    private static func findWebArea(from root: AXUIElement, deadline: CFAbsoluteTime) -> AXUIElement? {
+        var queue: [AXUIElement] = [root]
+        var budget = 80
+        while !queue.isEmpty, budget > 0 {
+            if CFAbsoluteTimeGetCurrent() > deadline { return nil }
+            let el = queue.removeFirst()
+            budget -= 1
+            let role = copyString(el, kAXRoleAttribute) ?? ""
+            if role == "AXWebArea" { return el }
+            if decorativeRoles.contains(role) { continue }
+            if let kids = copyChildren(el) {
+                queue.append(contentsOf: kids)
+            }
+        }
+        return nil
     }
 
     // MARK: - Tree walk
