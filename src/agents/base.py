@@ -1355,4 +1355,5 @@ def build_agent_options(
         ],
         permission_mode="bypassPermissions",
         max_turns=max_turns,
+        betas=[],  # Don't send beta flags — gateway may not support them
     )
