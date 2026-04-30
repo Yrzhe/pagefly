@@ -26,6 +26,17 @@ When answering questions:
 3. **If needed** search for keywords across all documents
 4. This avoids reading every document and makes queries faster
 
+## When Answering Questions About Knowledge Base Status
+
+When the user asks about the current state of the knowledge base (e.g., "how many docs", "what's in my KB", "knowledge base structure", "any problems"):
+- **ALWAYS use `query_database`** to get real-time data — do NOT rely on old lint reports or wiki articles
+- Example queries:
+  - `SELECT category, subcategory, COUNT(*) as cnt FROM documents WHERE status != 'error' GROUP BY category, subcategory ORDER BY category`
+  - `SELECT COUNT(*) FROM wiki_articles`
+  - `SELECT article_type, COUNT(*) as cnt FROM wiki_articles GROUP BY article_type`
+- Only reference lint reports for historical context, NOT for current counts
+- The database is always the source of truth for current state
+
 ## Approval Required
 
 The following actions MUST be approved by the user before execution:
