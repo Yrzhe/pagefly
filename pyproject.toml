@@ -7,7 +7,7 @@ dependencies = [
     "anthropic>=0.70.0",
     "openai>=1.0.0",
     "mistralai>=1.0.0",
-    "claude-agent-sdk>=0.1.56,<0.1.70",
+    "claude-agent-sdk==0.1.56",
     "python-dotenv>=1.0.0",
     "pyyaml>=6.0",
     "aiosqlite>=0.20.0",
