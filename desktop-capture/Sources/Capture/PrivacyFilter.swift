@@ -52,6 +52,23 @@ struct PrivacyFilter {
         if PrivacyFilter.blockedAXRoles.contains(snapshot.axRole) {
             return nil
         }
+        // Drop Electron/Chromium helper subprocesses that briefly become
+        // "frontmost" during IME flips, sandbox IPC, or GPU handoffs —
+        // e.g. `com.electron.lark.helper`, `com.google.Chrome.helper(.Renderer|.GPU|.Plugin)`.
+        // They're always siblings of the real app's row and carry no user
+        // content (their AX tree is empty), so the only thing they produce
+        // is a stray "Lark Helper / [empty]" row every few minutes.
+        let lowerBundle = snapshot.bundleID.lowercased()
+        if lowerBundle.contains(".helper") { return nil }
+        // Drop rows that carry no retrievable context at all: no text, no
+        // URL. These happen on transient AX-tree states (mid-navigation,
+        // focus on a bare AXGroup, Skia apps before OCR rescue fires) and
+        // render on the dashboard as "No text captured for this row." —
+        // pure noise. Rows with a URL but no text still survive (the URL
+        // alone is work-log context: "user was on bloome.im at 14:02").
+        if snapshot.textExcerpt.isEmpty, snapshot.url.isEmpty {
+            return nil
+        }
 
         let trimmedText = PrivacyFilter.truncate(snapshot.textExcerpt, to: PrivacyFilter.maxTextBytes)
 

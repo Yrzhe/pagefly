@@ -77,6 +77,22 @@ enum AXReader {
         "AXTab",
     ]
 
+    /// Container title/description/role-description strings (lowercased)
+    /// that indicate a sidebar or navigation region whose descendant text
+    /// is chrome, not user content. Skipping the subtree under one of these
+    /// stops the left rail of Maestri / Bloome / Termius from dominating
+    /// the capture while the main pane contains the actual work.
+    /// Multi-lingual since Electron apps localize these strings.
+    private static let sidebarContainerLabels: Set<String> = [
+        "sidebar", "side bar", "navigator", "navigation", "nav",
+        "边栏", "侧边栏", "导航", "导航栏",
+        "サイドバー", "ナビゲーション",
+        "사이드바",
+        "barre latérale",
+        "seitenleiste",
+        "barra lateral",
+    ]
+
     /// Per-pid TTL for the "enhanced UI" flag poke. Chromium-based apps
     /// materialize their full AX tree when they see `AXEnhancedUserInterface`
     /// go true, but rebuilding that tree is expensive, so we only poke once
@@ -140,10 +156,14 @@ enum AXReader {
             harvested = collector.text
         }
 
-        // Prefer focused-element text — it's the active typing context — and
-        // only fall back to harvested page text when the focus didn't yield
-        // anything meaningful.
-        let text = focusedText.isEmpty ? harvested : focusedText
+        // Pick the source with more text. Previously we always preferred
+        // focused-element text on the theory that "active typing context"
+        // is highest signal — but a focused empty input exposes only its
+        // placeholder (Feishu's "发送给 Bloome", 16 chars of zero-width
+        // padding, a search box's "Search", etc.), which would beat a
+        // 1000-char harvested window walk. Whichever is longer is almost
+        // always the better work-log entry.
+        let text = harvested.count > focusedText.count ? harvested : focusedText
 
         return ContextSnapshot(
             app: appName,
@@ -245,6 +265,11 @@ enum AXReader {
             // strings we've already recorded this walk (dedup).
             guard trimmed.count > 1 else { return }
             if seen.contains(trimmed) { return }
+            // Drop C++/Electron debug leaks like "ContentsView ClientView
+            // MainWidgetDelegateView TabContensView MultiWebView" — these
+            // are native view-class names bubbling up through AXDescription
+            // on Electron windows and contain zero user content.
+            if AXReader.looksLikeElectronClassNames(trimmed) { return }
             let remaining = limit - charCount
             if remaining <= 0 { return }
             let slice = trimmed.count <= remaining ? trimmed : String(trimmed.prefix(remaining))
@@ -277,6 +302,19 @@ enum AXReader {
         // Decorative subtrees: skip the whole branch, don't just skip this
         // node. Their descendants are also noise.
         if decorativeRoles.contains(role) { return }
+        // Sidebar / navigation subtrees. macOS native apps often expose
+        // `AXSubrole == AXSideBar` (Finder, Mail, Xcode) — trivial skip.
+        // Electron apps usually don't, but many DO label the container's
+        // `AXTitle` / `AXDescription` / `AXRoleDescription` with the
+        // localized word for "sidebar" / "navigation" (Maestri's "边栏",
+        // Bloome's "Navigator", etc.), which we match case-insensitively.
+        // Matching on the CONTAINER, not the text, means we only lose the
+        // chrome labels — legitimate mentions of "sidebar" elsewhere in
+        // the main content are unaffected.
+        if let subrole = copyString(element, kAXSubroleAttribute), subrole == "AXSideBar" {
+            return
+        }
+        if isSidebarContainer(element) { return }
 
         // URL — most browsers expose AXWebArea with kAXURLAttribute. Only
         // keep the first one we find; nested iframes can spam. Cheaper
@@ -319,6 +357,56 @@ enum AXReader {
             if CFAbsoluteTimeGetCurrent() > deadline { return }
             walk(child, depth: depth + 1, collector: &collector, urlOut: &urlOut, deadline: deadline)
         }
+    }
+
+    // MARK: - Container / string heuristics
+
+    /// True when the element's title, description, or role-description
+    /// (lowercased) matches a known sidebar/navigation label in any of a
+    /// few major locales. Checked against a small fixed set; unknown
+    /// languages fall through and the subtree still gets walked normally.
+    private static func isSidebarContainer(_ element: AXUIElement) -> Bool {
+        let candidates = [
+            copyString(element, kAXTitleAttribute),
+            copyString(element, kAXDescriptionAttribute),
+            copyString(element, kAXRoleDescriptionAttribute),
+        ]
+        for raw in candidates {
+            guard let s = raw else { continue }
+            let norm = s.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if norm.isEmpty { continue }
+            if sidebarContainerLabels.contains(norm) { return true }
+        }
+        return false
+    }
+
+    /// Detects strings that are entirely whitespace-separated C++/Obj-C
+    /// view-class identifiers, e.g. "ContentsView ClientView MainWidget
+    /// DelegateView TabContensView MultiWebView". These leak out of
+    /// Electron / Chromium / Qt windows through `AXDescription` on the
+    /// root window or a top-level group, and are pure noise.
+    ///
+    /// A token qualifies if it is a CamelCase alphabetic identifier
+    /// ending in one of the common UI-class suffixes (View / Widget /
+    /// Delegate / Panel / Controller / Host / Container / Manager).
+    /// Requires ≥2 such tokens to avoid false-positives on ordinary
+    /// capitalized words like "PreView".
+    static func looksLikeElectronClassNames(_ s: String) -> Bool {
+        let tokens = s.split { $0.isWhitespace }
+        guard tokens.count >= 2 else { return false }
+        let suffixes = ["View", "Widget", "Delegate", "Panel", "Controller", "Host", "Container", "Manager"]
+        for tok in tokens {
+            let t = String(tok)
+            guard let first = t.first, first.isUppercase else { return false }
+            guard t.allSatisfy({ $0.isLetter }) else { return false }
+            var matched = false
+            for suf in suffixes where t.hasSuffix(suf) {
+                matched = true
+                break
+            }
+            if !matched { return false }
+        }
+        return true
     }
 
     // MARK: - Attribute helpers
