@@ -62,6 +62,12 @@ Every wiki article MUST include references. When calling write_wiki_article, pro
   - `relation`: one of `source`, `derived_from`, `related_concept`, `supports`, `contradicts`
   - `confidence`: 0.0 to 1.0
 
+### Reference Linking Rules (IMPORTANT)
+- When creating a **concept** or **connection** page, include `derived_from` references to the relevant **summary** articles
+- When creating a **connection** A↔B page, add `related_concept` references to both concept A and concept B
+- When updating a **concept** page with new info, check if any **connection** pages reference it — add them as `related_concept` references
+- This ensures no articles become orphans (unreachable from the rest of the wiki)
+
 When updating, new references are merged with existing ones automatically.
 
 ## Summary Field
