@@ -161,7 +161,7 @@ export function ChatPage() {
       </header>
 
       {/* Messages */}
-      <div ref={scrollRef} onScroll={handleScroll} className="flex-1 overflow-y-auto">
+      <div ref={scrollRef} onScroll={handleScroll} className="flex-1 overflow-y-auto overflow-x-hidden">
         <div className="max-w-[760px] mx-auto px-6 py-6 flex flex-col gap-4">
           {hasMore && (
             <div className="text-center py-2">
@@ -183,15 +183,15 @@ export function ChatPage() {
                   </div>
                 )}
                 <div className={cn(
-                  'max-w-[85%] rounded-[12px] px-4 py-3',
+                  'max-w-[85%] rounded-[12px] px-4 py-3 overflow-hidden',
                   msg.role === 'user'
                     ? 'bg-accent-primary text-bg-primary'
                     : 'bg-bg-secondary border border-border'
                 )}>
                   {msg.role === 'user' ? (
-                    <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
+                    <p className="text-sm whitespace-pre-wrap break-words">{msg.content}</p>
                   ) : (
-                    <article className="prose-pagefly text-sm [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1 [&_li]:my-0.5">
+                    <article className="prose-pagefly text-sm [&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1 [&_li]:my-0.5 break-words [&_pre]:overflow-x-auto [&_code]:break-all">
                       <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
                     </article>
                   )}
