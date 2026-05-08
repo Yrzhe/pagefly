@@ -121,8 +121,25 @@ docker compose up -d
 ### Access
 
 - **Web UI**: `http://localhost` (or your configured port)
-- **API / Swagger**: `http://localhost:8000/docs`
+- **API / Swagger UI**: `http://localhost:8000/docs` — interactive API documentation with all endpoints, parameters, and response schemas
+- **OpenAPI Spec**: `http://localhost:8000/openapi.json` — machine-readable spec for agent integration
 - **Telegram**: Message your bot to start ingesting (if configured)
+
+### API Overview (~50 endpoints)
+
+| Category | Endpoints | Description |
+|----------|-----------|-------------|
+| Knowledge | 14 | Ingest, list, read, update, delete, download documents |
+| Wiki | 2 | List and read compiled wiki articles |
+| Search & Query | 3 | Full-text search, agent Q&A, knowledge graph |
+| Workspace | 8 | Draft creation area with image support |
+| Chat | 3 | Shared conversation (synced with Telegram) |
+| Schedules | 6 | Cron task management with run history |
+| Activity | 5 | Desktop capture events and audio upload |
+| Categories | 3 | Dynamic category management |
+| System | 7 | Stats, trends, tokens, health, demo data |
+
+Auth: Bearer token (JWT from login, API token, or master token).
 
 ### Load demo data anytime
 
