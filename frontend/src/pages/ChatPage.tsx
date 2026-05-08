@@ -147,7 +147,7 @@ export function ChatPage() {
   }
 
   return (
-    <div className="flex flex-col h-screen">
+    <div className="flex flex-col h-screen overflow-hidden">
       {/* Header */}
       <header className="flex items-center justify-between px-6 h-14 border-b border-border flex-shrink-0">
         <div className="flex items-center gap-3">
@@ -218,8 +218,8 @@ export function ChatPage() {
       </div>
 
       {/* Input */}
-      <div className="border-t border-border px-6 py-4 flex-shrink-0">
-        <div className="max-w-[760px] mx-auto relative">
+      <div className="border-t border-border px-4 sm:px-6 py-4 flex-shrink-0">
+        <div className="max-w-[760px] mx-auto relative w-full">
           {/* Slash command dropdown */}
           {showCommands && (
             <div className="absolute bottom-full mb-2 left-0 w-80 bg-bg-secondary border border-border rounded-[10px] shadow-lg overflow-hidden">

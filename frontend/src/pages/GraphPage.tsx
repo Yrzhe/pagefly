@@ -61,8 +61,10 @@ export function GraphPage() {
   // Use refs for draw function so it doesn't trigger useEffect re-init
   const selectedNodeRef = useRef<GNode | null>(null)
   const highlightIdsRef = useRef<Set<string>>(new Set())
+  const panelOpenRef = useRef(false)
   selectedNodeRef.current = selectedNode
   highlightIdsRef.current = highlightIds
+  panelOpenRef.current = panelOpen
 
   // Draw — reads from refs so it never causes useEffect re-init
   const draw = useCallback(() => {
@@ -258,6 +260,10 @@ export function GraphPage() {
           const node = findNode(event.offsetX, event.offsetY)
           if (node) {
             setSelectedNode(node)
+            // If panel is already open, reload content for new node
+            if (panelOpenRef.current) {
+              openPanel(node)
+            }
           } else {
             setSelectedNode(null)
             setPanelOpen(false)
