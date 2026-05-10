@@ -613,29 +613,42 @@ def _inject_ingest_context(chat_id: int, doc_id: str, filename: str) -> None:
         from datetime import datetime, timezone
         import json
 
-        # Try to read the document content
         doc = get_document(doc_id)
-        content_preview = ""
+        source_type = (doc.get("source_type", "") if doc else "").lower()
+        is_voice = source_type == "voice" or filename.lower().endswith((".ogg", ".oga", ".m4a", ".mp3", ".wav"))
+
+        # Read document content
+        content = ""
         if doc and doc.get("current_path"):
             md_path = Path(doc["current_path"]) / "document.md"
             if md_path.exists():
-                content_preview = md_path.read_text(encoding="utf-8")[:500]
+                content = md_path.read_text(encoding="utf-8")
 
-        if not content_preview:
-            # Check raw/ if not classified yet
+        if not content:
             for d in RAW_DIR.iterdir():
                 if doc_id[:8] in d.name:
                     md = d / "document.md"
                     if md.exists():
-                        content_preview = md.read_text(encoding="utf-8")[:500]
+                        content = md.read_text(encoding="utf-8")
                     break
 
         title = doc.get("title", filename) if doc else filename
-        summary = (
-            f"[System: A new document was just ingested into the knowledge base. "
-            f"Title: {title}. ID: {doc_id[:8]}. "
-            f"Content preview: {content_preview}]"
-        )
+
+        if is_voice:
+            # Voice: inject full transcript so agent can discuss it
+            summary = (
+                f"[System: Voice memo transcribed and saved to knowledge base. "
+                f"Title: {title}. ID: {doc_id[:8]}. "
+                f"Full transcript:\n{content}]"
+            )
+        else:
+            # Non-voice: preview only (PDFs etc. can be very large)
+            content_preview = content[:500]
+            summary = (
+                f"[System: A new document was just ingested into the knowledge base. "
+                f"Title: {title}. ID: {doc_id[:8]}. "
+                f"Content preview: {content_preview}]"
+            )
 
         session = _get_session(chat_id)
         ts = datetime.now(timezone.utc).astimezone().isoformat()

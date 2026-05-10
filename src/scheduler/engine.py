@@ -12,6 +12,7 @@ from src.shared.config import (
     SCHEDULE_DAILY_REVIEW,
     SCHEDULE_MONTHLY_REVIEW,
     SCHEDULE_WEEKLY_REVIEW,
+    TELEGRAM_CHAT_ID,
 )
 from src.shared.logger import get_logger
 from src.scheduler.notifier import notify
@@ -19,6 +20,31 @@ from src.scheduler.watcher import watch_inbox
 from src.storage.db import init_db
 
 logger = get_logger("scheduler.engine")
+
+
+def _inject_push_context(task_name: str, preview: str) -> None:
+    """Inject a system push notification into the chat session.
+
+    This ensures the Query Agent knows what scheduled tasks just ran,
+    so the user can discuss the results in the next message.
+    """
+    if not TELEGRAM_CHAT_ID:
+        return
+    try:
+        from src.channels.telegram import _get_session, _persist_session
+
+        chat_id = int(TELEGRAM_CHAT_ID)
+        session = _get_session(chat_id)
+        ts = datetime.now(timezone.utc).astimezone().isoformat()
+        truncated = preview[:500] if preview else "(no output)"
+        context = (
+            f"[System: Scheduled task '{task_name}' completed and results were "
+            f"sent to the user. Summary:\n{truncated}]"
+        )
+        session.messages.append({"role": "assistant", "content": context, "ts": ts})
+        _persist_session(chat_id)
+    except Exception as e:
+        logger.debug("Failed to inject push context for %s: %s", task_name, e)
 
 
 def _parse_cron(expr: str) -> dict:
@@ -42,6 +68,7 @@ async def _run_compiler() -> None:
         from src.agents.compiler import run_compiler
         await run_compiler()
         await notify("Compiler finished — new wiki articles generated.")
+        _inject_push_context("Compiler", "New wiki articles generated from recent knowledge documents.")
     except Exception as e:
         logger.error("Compiler failed: %s", e)
         await notify(f"Compiler failed: {e}")
@@ -55,6 +82,7 @@ async def _run_linker() -> None:
         result = await run_linker()
         preview = (result or "")[:300].replace("\n", " ")
         await notify(f"Linker finished.\n\n{preview}")
+        _inject_push_context("Linker", preview)
     except Exception as e:
         logger.error("Linker failed: %s", e)
         await notify(f"Linker failed: {e}")
@@ -68,6 +96,7 @@ async def _run_trend() -> None:
         result = await run_trend()
         preview = (result or "")[:300].replace("\n", " ")
         await notify(f"Trend Discovery finished.\n\n{preview}")
+        _inject_push_context("Trend Discovery", preview)
     except Exception as e:
         logger.error("Trend discovery failed: %s", e)
         await notify(f"Trend discovery failed: {e}")
@@ -137,6 +166,10 @@ async def _run_review(review_type: str) -> None:
                 file_path = str(md_path)
 
         await notify(f"{review_type.title()} Review completed", file_path=file_path)
+        _inject_push_context(
+            f"{review_type.title()} Review",
+            (result or "")[:500],
+        )
     except Exception as e:
         logger.error("%s review failed: %s", review_type, e)
         await notify(f"{review_type.title()} review failed: {e}")
@@ -164,6 +197,7 @@ async def _run_lint() -> None:
                 file_path = str(md_path)
 
         await notify("Wiki Lint Report completed", file_path=file_path)
+        _inject_push_context("Wiki Lint", (result or "")[:500])
     except Exception as e:
         logger.error("Wiki lint failed: %s", e)
         await notify(f"Wiki lint failed: {e}")
