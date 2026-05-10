@@ -1,44 +1,36 @@
-# Wiki Lint — Health Check + Auto-Fix
+# Wiki Lint — Health Check Report
 
-You are performing a health check on the PageFly knowledge base. Your goal is to find problems, fix what you can, and report what needs human attention.
+You are performing a health check on the PageFly knowledge base. The automated integrity system has already run deterministic auto-fixes (ghost reference removal, orphan connection backlinks, DB orphan registration). Your job is to **analyze and report** on issues that require human judgment.
 
-## IMPORTANT: You have write access. FIX problems when possible, don't just report them.
+## Already Auto-Fixed (by code, before you run)
 
-## Auto-Fix Actions (DO these directly)
+These are handled deterministically — do NOT attempt to fix them again:
+- Ghost references (source_doc_ids / references pointing to deleted docs)
+- Orphan connection backlinks (concepts missing backlinks to their connection articles)
+- DB ↔ filesystem sync (path updates, missing DB records)
 
-### 1. Ghost References
-- If a wiki article references a document ID that doesn't exist, remove the ghost reference
-- Use `write_wiki_article` with `update_id` to update the article's references
-- Log what you fixed in the report
+## Your Analysis Tasks
 
-### 2. Orphan Connection Pages
-- If a connection article links concept A ↔ B, but concept A doesn't reference the connection:
-- Read concept A, add the connection as a `related_concept` reference, update it
-- This fixes the "dead end" problem
-
-### 3. Duplicate Documents
+### 1. Duplicate Documents
 - If two knowledge documents have near-identical titles or content:
 - Note the duplicate pair in the report with recommendation to merge
 - Do NOT auto-delete — flag for human review
 
-## Report-Only Checks (flag but don't fix)
-
-### 4. Misclassification Suspects
-- Documents in "content-strategy" that aren't about content marketing
+### 2. Misclassification Suspects
 - Documents in wrong category based on their title/content
 - Flag with suggested correct category
 
-### 5. Coverage Gaps
+### 3. Coverage Gaps
 - Knowledge categories with many docs but few wiki compilations
 - Important concepts mentioned in 3+ docs but lacking their own wiki page
 
-### 6. Stale Content
+### 4. Stale Content
 - Wiki articles whose source documents were updated after the article
 - Summary articles that haven't been refreshed
 
-### 7. Data Integrity
-- Review the automated integrity report
-- Highlight patterns (e.g., repeated failures)
+### 5. Data Integrity
+- Review the automated integrity report (provided above your prompt)
+- Highlight patterns (e.g., repeated failures, categories with many issues)
 
 ## Output Format
 
@@ -48,19 +40,19 @@ Write your report as a lint article (article_type: "lint"):
 # Wiki Lint Report — {date}
 
 ## Summary
-- X issues found, Y auto-fixed, Z need human attention
+- X issues found, Y auto-fixed (by system), Z need human attention
 
-## Auto-Fixed
-(list what you actually fixed with IDs)
+## Auto-Fixed (by system)
+(summarize what the automated integrity check fixed — from the report above)
 
 ## Needs Human Attention
-(list issues you couldn't fix, with specific actionable suggestions)
+(list issues you found, with specific actionable suggestions)
 
 ## Health Metrics
 - Total knowledge docs: X
 - Total wiki articles: X
 - Orphan rate: X%
-- Ghost references: X (fixed/remaining)
+- Coverage score: X%
 ```
 
 Write in the same language as the majority of the wiki content.

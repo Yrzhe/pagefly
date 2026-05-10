@@ -228,8 +228,15 @@ def full_integrity_check() -> IntegrityReport:
 
     conn.close()
 
-    # Reference integrity
-    _check_reference_integrity(fs_knowledge_ids | fs_wiki_ids, report)
+    all_ids = fs_knowledge_ids | fs_wiki_ids
+
+    # Reference integrity (detection only — warnings)
+    _check_reference_integrity(all_ids, report)
+
+    # ── Deterministic auto-fixes ──
+    fix_ghost_references(all_ids, report)
+    fix_orphan_connection_backlinks(all_ids, report)
+    fix_db_orphans(fs_knowledge_ids, fs_wiki_ids, report)
 
     logger.info("Integrity check: %s", report.summary())
     return report
@@ -260,3 +267,260 @@ def _check_reference_integrity(all_ids: set[str], report: IntegrityReport) -> No
                 report.warnings.append(
                     f"'{title}': reference target {target[:8]} not found"
                 )
+
+
+# ── Deterministic auto-fix functions ──
+
+
+def fix_ghost_references(all_ids: set[str], report: IntegrityReport) -> None:
+    """Remove references to non-existent documents from wiki metadata.
+
+    Fixes both source_document_ids and references[].target_id entries
+    that point to IDs not found on disk.
+    """
+    if not WIKI_DIR.exists():
+        return
+
+    for meta_path in WIKI_DIR.rglob("metadata.json"):
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+
+        title = meta.get("title", meta_path.parent.name)
+        article_id = meta.get("id", "")
+        changed = False
+
+        # Fix source_document_ids
+        old_sources = meta.get("source_document_ids", [])
+        new_sources = [sid for sid in old_sources if sid in all_ids]
+        if len(new_sources) < len(old_sources):
+            ghost_count = len(old_sources) - len(new_sources)
+            meta["source_document_ids"] = new_sources
+            changed = True
+            report.auto_fixed.append(
+                f"'{title}': removed {ghost_count} ghost source_doc_id(s)"
+            )
+
+        # Fix references
+        old_refs = meta.get("references", [])
+        new_refs = []
+        dropped = 0
+        for ref in old_refs:
+            if not isinstance(ref, dict):
+                dropped += 1
+                continue
+            target = ref.get("target_id", "")
+            if target and target not in all_ids:
+                dropped += 1
+                continue
+            new_refs.append(ref)
+
+        if dropped > 0:
+            meta["references"] = new_refs
+            changed = True
+            report.auto_fixed.append(
+                f"'{title}': removed {dropped} ghost reference(s)"
+            )
+
+        if changed:
+            meta_path.write_text(
+                json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+            # Update DB source_document_ids if article has an ID
+            if article_id:
+                try:
+                    db.update_wiki_article(
+                        article_id,
+                        source_document_ids=json.dumps(new_sources),
+                    )
+                except Exception as e:
+                    logger.warning("Failed to update DB for %s: %s", article_id[:8], e)
+
+
+def fix_orphan_connection_backlinks(all_ids: set[str], report: IntegrityReport) -> None:
+    """Ensure connection articles are back-referenced by the concepts they link.
+
+    For each connection article, check that every concept/doc it references
+    has a reciprocal 'related_concept' reference back to the connection.
+    If missing, add the backlink to the concept's metadata.json.
+    """
+    if not WIKI_DIR.exists():
+        return
+
+    # Build a map of article_id → meta_path for quick lookup
+    id_to_meta: dict[str, Path] = {}
+    for meta_path in WIKI_DIR.rglob("metadata.json"):
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            aid = meta.get("id", "")
+            if aid:
+                id_to_meta[aid] = meta_path
+        except Exception:
+            continue
+
+    # Also index knowledge docs
+    if KNOWLEDGE_DIR.exists():
+        for meta_path in KNOWLEDGE_DIR.rglob("metadata.json"):
+            try:
+                meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                aid = meta.get("id", "")
+                if aid:
+                    id_to_meta[aid] = meta_path
+            except Exception:
+                continue
+
+    # Find all connection articles
+    connection_dir = WIKI_DIR / "connection"
+    if not connection_dir.exists():
+        return
+
+    for meta_path in connection_dir.rglob("metadata.json"):
+        try:
+            conn_meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+
+        conn_id = conn_meta.get("id", "")
+        conn_title = conn_meta.get("title", meta_path.parent.name)
+        if not conn_id or conn_meta.get("article_type") != "connection":
+            continue
+
+        # Get all targets this connection references
+        referenced_ids = set()
+        for ref in conn_meta.get("references", []):
+            if isinstance(ref, dict):
+                tid = ref.get("target_id", "")
+                if tid and tid != conn_id:
+                    referenced_ids.add(tid)
+        for sid in conn_meta.get("source_document_ids", []):
+            if sid and sid != conn_id:
+                referenced_ids.add(sid)
+
+        # Check each referenced doc has a backlink to this connection
+        for target_id in referenced_ids:
+            if target_id not in id_to_meta:
+                continue
+
+            target_meta_path = id_to_meta[target_id]
+            try:
+                target_meta = json.loads(target_meta_path.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+
+            # Check if backlink already exists
+            existing_refs = target_meta.get("references", [])
+            has_backlink = any(
+                isinstance(r, dict)
+                and r.get("target_id") == conn_id
+                for r in existing_refs
+            )
+
+            if not has_backlink:
+                # Add backlink
+                existing_refs.append({
+                    "target_id": conn_id,
+                    "relation": "related_concept",
+                    "confidence": 0.8,
+                })
+                target_meta["references"] = existing_refs
+                target_meta_path.write_text(
+                    json.dumps(target_meta, ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
+                target_title = target_meta.get("title", target_meta_path.parent.name)
+                report.auto_fixed.append(
+                    f"'{target_title}': added backlink to connection '{conn_title}'"
+                )
+
+
+def fix_db_orphans(
+    fs_knowledge_ids: set[str],
+    fs_wiki_ids: set[str],
+    report: IntegrityReport,
+) -> None:
+    """Register filesystem documents that are missing from the database.
+
+    Scans knowledge/ and wiki/ for docs with valid metadata.json that
+    have no corresponding DB record, and inserts them.
+    """
+    if KNOWLEDGE_DIR.exists():
+        for meta_path in KNOWLEDGE_DIR.rglob("metadata.json"):
+            try:
+                meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            doc_id = meta.get("id", "")
+            if not doc_id:
+                continue
+            db_doc = db.get_document(doc_id)
+            if db_doc is not None:
+                continue
+            # Insert into DB
+            try:
+                db.insert_document(
+                    doc_id=doc_id,
+                    source_type=meta.get("source_type", "text"),
+                    original_filename=meta.get("original_filename", ""),
+                    current_path=str(meta_path.parent),
+                    ingested_at=meta.get("ingested_at", ""),
+                    title=meta.get("title", ""),
+                )
+                # Update additional fields if available
+                updates = {}
+                if meta.get("category"):
+                    updates["category"] = meta["category"]
+                if meta.get("subcategory"):
+                    updates["subcategory"] = meta["subcategory"]
+                if meta.get("status"):
+                    updates["status"] = meta["status"]
+                if meta.get("tags"):
+                    updates["tags"] = json.dumps(meta["tags"])
+                if updates:
+                    db.update_document(doc_id, **updates)
+                report.auto_fixed.append(
+                    f"'{meta.get('title', doc_id[:8])}': registered in DB from disk"
+                )
+            except Exception as e:
+                logger.warning("Failed to register doc %s in DB: %s", doc_id[:8], e)
+
+    if WIKI_DIR.exists():
+        for meta_path in WIKI_DIR.rglob("metadata.json"):
+            try:
+                meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            article_id = meta.get("id", "")
+            if not article_id:
+                continue
+            conn = db.get_connection()
+            row = conn.execute(
+                "SELECT id FROM wiki_articles WHERE id = ?", (article_id,)
+            ).fetchone()
+            conn.close()
+            if row is not None:
+                continue
+            # Insert into DB
+            try:
+                from src.ingest.metadata import now_iso
+                with db.transaction() as conn:
+                    conn.execute(
+                        """INSERT INTO wiki_articles
+                           (id, title, article_type, file_path, summary, source_document_ids, created_at, updated_at)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (
+                            article_id,
+                            meta.get("title", ""),
+                            meta.get("article_type", ""),
+                            str(meta_path.parent),
+                            meta.get("summary", "")[:150] if meta.get("summary") else "",
+                            json.dumps(meta.get("source_document_ids", [])),
+                            meta.get("created_at", now_iso()),
+                            meta.get("updated_at", now_iso()),
+                        ),
+                    )
+                report.auto_fixed.append(
+                    f"'{meta.get('title', article_id[:8])}': wiki article registered in DB from disk"
+                )
+            except Exception as e:
+                logger.warning("Failed to register wiki %s in DB: %s", article_id[:8], e)

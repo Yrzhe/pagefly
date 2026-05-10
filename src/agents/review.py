@@ -65,9 +65,10 @@ def _build_lint_prompt(base_prompt: str) -> str:
         f"## Automated Integrity Report\n\n"
         f"{integrity_section}\n\n"
         f"---\n\n"
-        f"Now perform the full lint analysis described below. "
-        f"Use the integrity report above as your starting point, "
-        f"then run the additional checks.\n\n"
+        f"The auto-fix functions above have already been applied (ghost references removed, "
+        f"orphan backlinks added, DB orphans registered). "
+        f"Focus your analysis on the report-only checks below: "
+        f"misclassification suspects, coverage gaps, stale content, and data integrity patterns.\n\n"
         f"{base_prompt}"
     )
 

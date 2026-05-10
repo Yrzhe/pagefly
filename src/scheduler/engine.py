@@ -47,6 +47,32 @@ async def _run_compiler() -> None:
         await notify(f"Compiler failed: {e}")
 
 
+async def _run_linker() -> None:
+    """Scheduled task: run linker agent to discover missing connections."""
+    logger.info("Scheduled linker starting...")
+    try:
+        from src.agents.linker import run_linker
+        result = await run_linker()
+        preview = (result or "")[:300].replace("\n", " ")
+        await notify(f"Linker finished.\n\n{preview}")
+    except Exception as e:
+        logger.error("Linker failed: %s", e)
+        await notify(f"Linker failed: {e}")
+
+
+async def _run_trend() -> None:
+    """Scheduled task: run trend discovery agent."""
+    logger.info("Scheduled trend discovery starting...")
+    try:
+        from src.agents.trend import run_trend
+        result = await run_trend()
+        preview = (result or "")[:300].replace("\n", " ")
+        await notify(f"Trend Discovery finished.\n\n{preview}")
+    except Exception as e:
+        logger.error("Trend discovery failed: %s", e)
+        await notify(f"Trend discovery failed: {e}")
+
+
 async def _run_review(review_type: str) -> None:
     """Scheduled task: run review agent."""
     logger.info("Scheduled %s review starting...", review_type)
@@ -345,6 +371,12 @@ async def _dispatch_custom_task(task_id: str, task_name: str, task_type: str, pr
     elif task_type == "compiler":
         from src.agents.compiler import run_compiler
         runner = run_compiler()
+    elif task_type == "linker":
+        from src.agents.linker import run_linker
+        runner = run_linker()
+    elif task_type == "trend":
+        from src.agents.trend import run_trend
+        runner = run_trend()
     elif task_type in ("custom", "ingest"):
         from src.agents.query import ask
         effective_prompt = prompt.strip() or f"Run scheduled task: {task_name}"
@@ -444,6 +476,20 @@ async def start_scheduler() -> None:
         _run_lint,
         trigger=CronTrigger(day_of_week="sun", hour=3, minute=0),
         id="wiki_lint", name="Wiki Lint",
+    )
+
+    # Linker (Wednesday 3am — midweek connection discovery)
+    scheduler.add_job(
+        _run_linker,
+        trigger=CronTrigger(day_of_week="wed", hour=3, minute=0),
+        id="linker", name="Linker",
+    )
+
+    # Trend discovery (Friday 9am — end-of-week insights)
+    scheduler.add_job(
+        _run_trend,
+        trigger=CronTrigger(day_of_week="fri", hour=9, minute=0),
+        id="trend_discovery", name="Trend Discovery",
     )
 
     # Workspace organizer (daily at 3:30am — LLM-powered triage)
