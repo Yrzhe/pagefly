@@ -130,6 +130,14 @@ CREATE TABLE IF NOT EXISTS chat_sessions (
     updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS roam_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    doc_id TEXT NOT NULL,
+    roamed_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_roam_history_doc ON roam_history(doc_id);
+CREATE INDEX IF NOT EXISTS idx_roam_history_at ON roam_history(roamed_at DESC);
+
 CREATE TABLE IF NOT EXISTS audio_recordings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     local_uuid TEXT UNIQUE,
@@ -638,6 +646,35 @@ def delete_session(chat_id: int) -> None:
     conn.execute("DELETE FROM chat_sessions WHERE chat_id = ?", (chat_id,))
     conn.commit()
     conn.close()
+
+
+# ── Roam History ──
+
+def record_roam(doc_ids: list[str]) -> None:
+    """Record that these documents were roamed."""
+    if not doc_ids:
+        return
+    ts = now_iso()
+    conn = get_connection()
+    try:
+        conn.executemany(
+            "INSERT INTO roam_history (doc_id, roamed_at) VALUES (?, ?)",
+            [(did, ts) for did in doc_ids],
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_recently_roamed(days: int = 14) -> set[str]:
+    """Get doc IDs that were roamed in the last N days."""
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT DISTINCT doc_id FROM roam_history WHERE roamed_at >= date('now', ?)",
+        (f"-{days} days",),
+    ).fetchall()
+    conn.close()
+    return {r["doc_id"] for r in rows}
 
 
 # ── Desktop Activity ──

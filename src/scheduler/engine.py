@@ -77,66 +77,15 @@ async def _run_daily_roam() -> None:
     """Scheduled task: push random knowledge documents for resurfacing."""
     logger.info("Daily Roam starting...")
     try:
-        from pathlib import Path
-        from src.storage import db
+        from src.shared.roam import pick_roam_docs, format_roam_message
         from src.shared.config import TELEGRAM_CHAT_ID
 
-        conn = db.get_connection()
-        rows = conn.execute(
-            "SELECT id, title, category, subcategory, current_path "
-            "FROM documents WHERE status != 'error' "
-            "AND ingested_at < date('now', '-7 days') "
-            "ORDER BY RANDOM() LIMIT 3"
-        ).fetchall()
-
-        # Fallback if not enough old docs
-        if len(rows) < 3:
-            existing_ids = {r["id"] for r in rows}
-            extra = conn.execute(
-                "SELECT id, title, category, subcategory, current_path "
-                "FROM documents WHERE status != 'error' "
-                "ORDER BY RANDOM() LIMIT ?",
-                (3 - len(rows),),
-            ).fetchall()
-            for r in extra:
-                if r["id"] not in existing_ids:
-                    rows.append(r)
-        conn.close()
-
-        if not rows:
+        items = pick_roam_docs(count=3)
+        if not items:
             logger.info("Daily Roam: no documents to resurface")
             return
 
-        # Build message
-        lines = ["📖 **Daily Random Roam**\n"]
-        doc_summaries = []
-        for i, row in enumerate(rows, 1):
-            title = row["title"] or "(untitled)"
-            cat = row["category"] or ""
-            sub = row["subcategory"] or ""
-            tag = f"{cat}/{sub}" if sub else cat
-
-            # Read preview
-            preview = ""
-            if row["current_path"]:
-                md_path = Path(row["current_path"]) / "document.md"
-                if md_path.exists():
-                    raw = md_path.read_text(encoding="utf-8")
-                    if raw.startswith("---"):
-                        parts = raw.split("---", 2)
-                        raw = parts[2].strip() if len(parts) >= 3 else raw
-                    preview = raw[:200].replace("\n", " ")
-
-            lines.append(f"**{i}. {title}**")
-            if tag:
-                lines.append(f"   [{tag}]")
-            if preview:
-                lines.append(f"   {preview}...")
-            lines.append("")
-
-            doc_summaries.append(f"{title} [{tag}]: {preview[:100]}")
-
-        message = "\n".join(lines)
+        message = format_roam_message(items)
         await notify(message)
 
         # Inject into chat context so Query Agent knows what was pushed
@@ -148,10 +97,11 @@ async def _run_daily_roam() -> None:
                 chat_id = int(TELEGRAM_CHAT_ID)
                 session = _get_session(chat_id)
                 ts = dt.now(timezone.utc).astimezone().isoformat()
+                summaries = [f"{it['title']} [{it['category']}]: {it['preview'][:100]}" for it in items]
                 context = (
                     "[System: Daily Random Roam was just sent to the user. "
                     "These documents were resurfaced for review:\n"
-                    + "\n".join(f"- {s}" for s in doc_summaries)
+                    + "\n".join(f"- {s}" for s in summaries)
                     + "\nThe user may want to discuss these topics.]"
                 )
                 session.messages.append({"role": "assistant", "content": context, "ts": ts})

@@ -255,56 +255,16 @@ async def _cmd_status(update: Update, context) -> None:
 
 async def _cmd_roam(update: Update, context) -> None:
     """Handle /roam command — random knowledge resurfacing."""
-    from src.storage.db import get_connection
+    from src.shared.roam import pick_roam_docs, format_roam_message
 
     chat_id = update.effective_chat.id
-    conn = get_connection()
-    rows = conn.execute(
-        "SELECT id, title, category, subcategory, current_path "
-        "FROM documents WHERE status != 'error' "
-        "AND ingested_at < date('now', '-7 days') "
-        "ORDER BY RANDOM() LIMIT 3"
-    ).fetchall()
-    if len(rows) < 3:
-        existing = {r["id"] for r in rows}
-        extra = conn.execute(
-            "SELECT id, title, category, subcategory, current_path "
-            "FROM documents WHERE status != 'error' "
-            "ORDER BY RANDOM() LIMIT ?",
-            (3 - len(rows),),
-        ).fetchall()
-        rows = list(rows) + [r for r in extra if r["id"] not in existing]
-    conn.close()
+    items = pick_roam_docs(count=3)
 
-    if not rows:
+    if not items:
         await update.message.reply_text("No documents available yet.")
         return
 
-    lines = ["**Random Roam**\n"]
-    doc_summaries = []
-    for i, row in enumerate(rows, 1):
-        title = row["title"] or "(untitled)"
-        tag = row["category"] or ""
-        if row["subcategory"]:
-            tag += f"/{row['subcategory']}"
-        preview = ""
-        if row["current_path"]:
-            md_path = Path(row["current_path"]) / "document.md"
-            if md_path.exists():
-                raw = md_path.read_text(encoding="utf-8")
-                if raw.startswith("---"):
-                    parts = raw.split("---", 2)
-                    raw = parts[2].strip() if len(parts) >= 3 else raw
-                preview = raw[:200].replace("\n", " ")
-        lines.append(f"**{i}. {title}**")
-        if tag:
-            lines.append(f"   [{tag}]")
-        if preview:
-            lines.append(f"   {preview}...")
-        lines.append("")
-        doc_summaries.append(f"{title} [{tag}]: {preview[:100]}")
-
-    text = "\n".join(lines)
+    text = format_roam_message(items)
     await update.message.reply_text(
         _escape_md(text).replace(r"\*", "*"),
         parse_mode=ParseMode.MARKDOWN_V2,
@@ -314,9 +274,10 @@ async def _cmd_roam(update: Update, context) -> None:
     try:
         session = _get_session(chat_id)
         ts = datetime.now(timezone.utc).astimezone().isoformat()
+        summaries = [f"{it['title']} [{it['category']}]: {it['preview'][:100]}" for it in items]
         ctx = (
             "[System: User used /roam. These documents were resurfaced:\n"
-            + "\n".join(f"- {s}" for s in doc_summaries)
+            + "\n".join(f"- {s}" for s in summaries)
             + "\nUser may want to discuss these.]"
         )
         session.messages.append({"role": "user", "content": "/roam", "ts": ts})

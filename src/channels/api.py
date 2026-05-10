@@ -497,54 +497,8 @@ async def full_text_search(body: dict):
 @app.get("/api/roam", dependencies=[Depends(verify_token)])
 async def get_daily_roam():
     """Get random documents for knowledge resurfacing."""
-    conn = db.get_connection()
-    try:
-        # Prefer older documents (ingested >7 days ago)
-        rows = conn.execute(
-            "SELECT id, title, category, subcategory, current_path, ingested_at "
-            "FROM documents WHERE status != 'error' "
-            "AND ingested_at < date('now', '-7 days') "
-            "ORDER BY RANDOM() LIMIT 3"
-        ).fetchall()
-
-        # Fallback: if not enough old docs, fill with any
-        if len(rows) < 3:
-            existing_ids = {r["id"] for r in rows}
-            extra = conn.execute(
-                "SELECT id, title, category, subcategory, current_path, ingested_at "
-                "FROM documents WHERE status != 'error' "
-                "ORDER BY RANDOM() LIMIT ?",
-                (3 - len(rows),),
-            ).fetchall()
-            for r in extra:
-                if r["id"] not in existing_ids:
-                    rows.append(r)
-    finally:
-        conn.close()
-
-    results = []
-    for row in rows:
-        preview = ""
-        if row["current_path"]:
-            md_path = Path(row["current_path"]) / "document.md"
-            if md_path.exists():
-                raw = md_path.read_text(encoding="utf-8")
-                # Strip YAML frontmatter if present
-                if raw.startswith("---"):
-                    parts = raw.split("---", 2)
-                    raw = parts[2].strip() if len(parts) >= 3 else raw
-                preview = raw[:500]
-
-        results.append({
-            "id": row["id"],
-            "title": row["title"],
-            "category": row["category"] or "",
-            "subcategory": row["subcategory"] or "",
-            "preview": preview,
-            "ingested_at": row["ingested_at"] or "",
-        })
-
-    return {"items": results}
+    from src.shared.roam import pick_roam_docs
+    return {"items": pick_roam_docs(count=3)}
 
 
 # ── Schedules ──
@@ -1501,50 +1455,11 @@ async def web_chat(body: dict):
 
     # Handle /roam command locally (no LLM needed)
     if user_message.strip() == "/roam":
+        from src.shared.roam import pick_roam_docs, format_roam_message
         from datetime import datetime as dt, timezone
-        conn = db.get_connection()
-        rows = conn.execute(
-            "SELECT id, title, category, subcategory, current_path "
-            "FROM documents WHERE status != 'error' "
-            "AND ingested_at < date('now', '-7 days') "
-            "ORDER BY RANDOM() LIMIT 3"
-        ).fetchall()
-        if len(rows) < 3:
-            extra = conn.execute(
-                "SELECT id, title, category, subcategory, current_path "
-                "FROM documents WHERE status != 'error' "
-                "ORDER BY RANDOM() LIMIT ?",
-                (3 - len(rows),),
-            ).fetchall()
-            existing = {r["id"] for r in rows}
-            rows = list(rows) + [r for r in extra if r["id"] not in existing]
-        conn.close()
 
-        if not rows:
-            roam_reply = "No documents available for roam yet."
-        else:
-            lines = ["**Random Roam**\n"]
-            for i, row in enumerate(rows, 1):
-                title = row["title"] or "(untitled)"
-                tag = row["category"] or ""
-                if row["subcategory"]:
-                    tag += f"/{row['subcategory']}"
-                preview = ""
-                if row["current_path"]:
-                    md_path = Path(row["current_path"]) / "document.md"
-                    if md_path.exists():
-                        raw = md_path.read_text(encoding="utf-8")
-                        if raw.startswith("---"):
-                            parts = raw.split("---", 2)
-                            raw = parts[2].strip() if len(parts) >= 3 else raw
-                        preview = raw[:200].replace("\n", " ")
-                lines.append(f"**{i}. {title}**")
-                if tag:
-                    lines.append(f"   [{tag}]")
-                if preview:
-                    lines.append(f"   {preview}...")
-                lines.append("")
-            roam_reply = "\n".join(lines)
+        items = pick_roam_docs(count=3)
+        roam_reply = format_roam_message(items)
 
         ts = dt.now(timezone.utc).astimezone().isoformat()
         session.messages.append({"role": "user", "content": "/roam", "ts": ts})
