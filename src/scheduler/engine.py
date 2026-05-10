@@ -235,17 +235,19 @@ async def _catchup_chat_archive() -> None:
     await asyncio.sleep(10)  # Wait for bot to initialize
 
     yesterday = (datetime.now(timezone.utc).astimezone() - timedelta(days=1)).strftime("%Y-%m-%d")
+    today = datetime.now(timezone.utc).astimezone().strftime("%Y-%m-%d")
 
-    # Check if yesterday's archive already exists (by filename pattern)
     conn = database.get_connection()
+    # Check if yesterday OR today archive already exists
+    # (_save_daily_chat archives "today's" messages, not yesterday's)
     row = conn.execute(
-        "SELECT COUNT(*) FROM documents WHERE original_filename LIKE ?",
-        (f"chat_{yesterday}%",),
+        "SELECT COUNT(*) FROM documents WHERE original_filename LIKE ? OR original_filename LIKE ?",
+        (f"chat_{yesterday}%", f"chat_{today}%"),
     ).fetchone()
     conn.close()
 
     if row[0] > 0:
-        logger.info("Archive for %s already exists (%d docs), no catch-up needed", yesterday, row[0])
+        logger.info("Chat archive already exists for %s or %s (%d docs), skipping catch-up", yesterday, today, row[0])
         return
 
     # Check if there are any messages from yesterday worth archiving
@@ -267,7 +269,6 @@ async def _catchup_chat_archive() -> None:
         from src.channels.telegram import _save_daily_chat, _sessions
         from src.agents.query import QuerySession
 
-        # Hydrate in-memory sessions from DB so _save_daily_chat has data
         all_sessions = database.load_all_sessions()
         for cid, msgs in all_sessions.items():
             if cid not in _sessions and msgs:
