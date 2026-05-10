@@ -236,14 +236,19 @@ async def _catchup_chat_archive() -> None:
 
     yesterday = (datetime.now(timezone.utc).astimezone() - timedelta(days=1)).strftime("%Y-%m-%d")
 
+    # Check if yesterday's archive already exists (by filename pattern)
     conn = database.get_connection()
     row = conn.execute(
-        "SELECT COUNT(*) FROM documents WHERE original_filename LIKE ? OR ingested_at LIKE ?",
-        (f"chat_{yesterday}%", f"{yesterday}%"),
+        "SELECT COUNT(*) FROM documents WHERE original_filename LIKE ?",
+        (f"chat_{yesterday}%",),
     ).fetchone()
     conn.close()
 
-    # Also check if there are any messages from yesterday worth archiving
+    if row[0] > 0:
+        logger.info("Archive for %s already exists (%d docs), no catch-up needed", yesterday, row[0])
+        return
+
+    # Check if there are any messages from yesterday worth archiving
     all_sessions = database.load_all_sessions()
     has_yesterday_msgs = False
     for cid, msgs in all_sessions.items():
@@ -253,24 +258,25 @@ async def _catchup_chat_archive() -> None:
                 has_yesterday_msgs = True
                 break
 
-    if row[0] == 0 and has_yesterday_msgs:
-        logger.info("Missed archive for %s detected, running catch-up...", yesterday)
-        try:
-            from src.channels.telegram import _save_daily_chat, _sessions
-            from src.agents.query import QuerySession
+    if not has_yesterday_msgs:
+        logger.info("No messages from %s to archive, skipping catch-up", yesterday)
+        return
 
-            # Hydrate in-memory sessions from DB so _save_daily_chat has data
-            all_sessions = database.load_all_sessions()
-            for cid, msgs in all_sessions.items():
-                if cid not in _sessions and msgs:
-                    _sessions[cid] = (QuerySession(messages=msgs), datetime.now(timezone.utc).timestamp())
+    logger.info("Missed archive for %s detected, running catch-up...", yesterday)
+    try:
+        from src.channels.telegram import _save_daily_chat, _sessions
+        from src.agents.query import QuerySession
 
-            await _save_daily_chat(None)
-            logger.info("Catch-up archive for %s completed", yesterday)
-        except Exception as e:
-            logger.error("Catch-up archive failed: %s", e)
-    else:
-        logger.info("Archive for %s already exists, no catch-up needed", yesterday)
+        # Hydrate in-memory sessions from DB so _save_daily_chat has data
+        all_sessions = database.load_all_sessions()
+        for cid, msgs in all_sessions.items():
+            if cid not in _sessions and msgs:
+                _sessions[cid] = (QuerySession(messages=msgs), datetime.now(timezone.utc).timestamp())
+
+        await _save_daily_chat(None)
+        logger.info("Catch-up archive for %s completed", yesterday)
+    except Exception as e:
+        logger.error("Catch-up archive failed: %s", e)
 
 
 async def _run_activity_log() -> None:
