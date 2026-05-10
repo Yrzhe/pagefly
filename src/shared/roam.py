@@ -1,11 +1,61 @@
 """Roam — random knowledge resurfacing with dedup and staleness weighting."""
 
+import json
 from pathlib import Path
 
 from src.shared.logger import get_logger
 from src.storage import db
 
 logger = get_logger("shared.roam")
+
+
+def _strip_frontmatter(raw: str) -> str:
+    """Strip YAML frontmatter (handles double frontmatter from compiler bugs)."""
+    while raw.startswith("---"):
+        parts = raw.split("---", 2)
+        if len(parts) >= 3:
+            raw = parts[2].strip()
+        else:
+            break
+    return raw
+
+
+def _find_summary_for_doc(doc_id: str) -> str | None:
+    """Find the wiki summary article for a knowledge document.
+
+    Returns the summary content (frontmatter stripped) or None.
+    """
+    conn = db.get_connection()
+    rows = conn.execute(
+        "SELECT file_path FROM wiki_articles WHERE article_type = 'summary'"
+    ).fetchall()
+    conn.close()
+
+    for row in rows:
+        meta_path = Path(row["file_path"]) / "metadata.json"
+        if not meta_path.exists():
+            continue
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            if doc_id in meta.get("source_document_ids", []):
+                md_path = Path(row["file_path"]) / "document.md"
+                if md_path.exists():
+                    raw = md_path.read_text(encoding="utf-8")
+                    return _strip_frontmatter(raw)
+        except Exception:
+            continue
+    return None
+
+
+def _read_doc_preview(current_path: str, max_chars: int = 500) -> str:
+    """Read raw document preview as fallback when no summary exists."""
+    if not current_path:
+        return ""
+    md_path = Path(current_path) / "document.md"
+    if not md_path.exists():
+        return ""
+    raw = md_path.read_text(encoding="utf-8")
+    return _strip_frontmatter(raw)[:max_chars]
 
 
 def pick_roam_docs(count: int = 3) -> list[dict]:
@@ -66,19 +116,16 @@ def pick_roam_docs(count: int = 3) -> list[dict]:
                 pool.pop(i)
                 break
 
-    # Build results with previews
+    # Build results — prefer wiki summary, fallback to raw preview
     results = []
     for row in selected:
-        preview = ""
-        if row["current_path"]:
-            md_path = Path(row["current_path"]) / "document.md"
-            if md_path.exists():
-                raw = md_path.read_text(encoding="utf-8")
-                # Strip YAML frontmatter
-                if raw.startswith("---"):
-                    parts = raw.split("---", 2)
-                    raw = parts[2].strip() if len(parts) >= 3 else raw
-                preview = raw[:500]
+        summary = _find_summary_for_doc(row["id"])
+        if summary:
+            preview = summary
+            preview_type = "summary"
+        else:
+            preview = _read_doc_preview(row["current_path"])
+            preview_type = "raw"
 
         results.append({
             "id": row["id"],
@@ -86,6 +133,7 @@ def pick_roam_docs(count: int = 3) -> list[dict]:
             "category": row["category"] or "",
             "subcategory": row["subcategory"] or "",
             "preview": preview,
+            "preview_type": preview_type,
             "ingested_at": row["ingested_at"] or "",
         })
 
@@ -95,8 +143,12 @@ def pick_roam_docs(count: int = 3) -> list[dict]:
     return results
 
 
-def format_roam_message(items: list[dict], max_preview: int = 200) -> str:
-    """Format roam items into a markdown message."""
+def format_roam_message(items: list[dict], max_preview: int = 500) -> str:
+    """Format roam items into a markdown message.
+
+    Summary previews are shown in full (usually concise).
+    Raw previews are truncated to max_preview chars.
+    """
     if not items:
         return "No documents available for roam yet."
 
@@ -105,13 +157,19 @@ def format_roam_message(items: list[dict], max_preview: int = 200) -> str:
         tag = item["category"]
         if item["subcategory"]:
             tag += f"/{item['subcategory']}"
-        preview = item["preview"][:max_preview].replace("\n", " ")
+
+        is_summary = item.get("preview_type") == "summary"
+        preview = item["preview"]
+        if not is_summary:
+            preview = preview[:max_preview].replace("\n", " ")
+            if len(item["preview"]) > max_preview:
+                preview += "..."
 
         lines.append(f"**{i}. {item['title']}**")
         if tag:
             lines.append(f"   [{tag}]")
         if preview:
-            lines.append(f"   {preview}...")
+            lines.append(f"   {preview}")
         lines.append("")
 
     return "\n".join(lines)
