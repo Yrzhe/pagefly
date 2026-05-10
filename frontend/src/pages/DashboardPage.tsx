@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { LayoutDashboard, FileText, BookOpen, Clock, FolderOpen, Calendar, ArrowRight, Bot, Mic, ChevronDown, ChevronRight, CheckCircle2, Inbox, Loader2, AlertTriangle, X, ExternalLink } from 'lucide-react'
+import { LayoutDashboard, FileText, BookOpen, Clock, FolderOpen, Calendar, ArrowRight, Bot, Mic, ChevronDown, ChevronRight, CheckCircle2, Inbox, Loader2, AlertTriangle, X, ExternalLink, Shuffle, Compass } from 'lucide-react'
 import api from '@/api/client'
 import { cn } from '@/lib/utils'
 import { OnboardingWizard } from '@/components/OnboardingWizard'
@@ -68,6 +68,15 @@ interface PendingAudio {
   error: string
 }
 
+interface RoamItem {
+  id: string
+  title: string
+  category: string
+  subcategory: string
+  preview: string
+  ingested_at: string
+}
+
 interface PendingResp {
   days: PendingDay[]
   audio: PendingAudio[]
@@ -111,6 +120,8 @@ export function DashboardPage() {
   const [activity, setActivity] = useState<Activity[]>([])
   const [trends, setTrends] = useState<TrendDay[]>([])
   const [pending, setPending] = useState<PendingResp | null>(null)
+  const [roamItems, setRoamItems] = useState<RoamItem[]>([])
+  const [roamLoading, setRoamLoading] = useState(false)
   const [loading, setLoading] = useState(true)
   const [showOnboarding, setShowOnboarding] = useState(false)
   const navigate = useNavigate()
@@ -130,9 +141,20 @@ export function DashboardPage() {
       setActivity(a.data.activity || [])
       setTrends(t.data.trends || [])
       setPending(p.data)
+      // Roam is independent — don't block dashboard on it
+      api.get('/api/roam').then(r => setRoamItems(r.data.items || [])).catch(() => {})
     } catch (err) { console.error('Dashboard fetch error:', err) }
     finally { setLoading(false) }
   }, [])
+
+  const shuffleRoam = async () => {
+    setRoamLoading(true)
+    try {
+      const { data } = await api.get('/api/roam')
+      setRoamItems(data.items || [])
+    } catch { /* silent */ }
+    finally { setRoamLoading(false) }
+  }
 
   useEffect(() => { fetchData() }, [fetchData])
 
@@ -188,6 +210,44 @@ export function DashboardPage() {
           <StatCard icon={<Bot size={16} />} label="Operations (14d)" value={totalIngest14d + totalWiki14d} sub={`${totalIngest14d} ingest · ${totalWiki14d} wiki`} />
           <StatCard icon={<Calendar size={16} />} label="Schedules" value={stats?.scheduled_tasks || 0} sub="active tasks" />
         </div>
+
+        {/* Daily Roam */}
+        {roamItems.length > 0 && (
+          <div className="flex flex-col gap-3">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-bold uppercase tracking-[1.5px] text-accent-primary flex items-center gap-1.5">
+                <Compass size={12} /> Today's Roam
+              </span>
+              <button
+                onClick={shuffleRoam}
+                disabled={roamLoading}
+                className="flex items-center gap-1 px-2 py-1 border border-border rounded-[6px] text-[10px] text-text-secondary hover:bg-bg-secondary transition-colors disabled:opacity-40"
+              >
+                <Shuffle size={10} className={roamLoading ? 'animate-spin' : ''} /> Shuffle
+              </button>
+            </div>
+            <div className="grid grid-cols-3 gap-4">
+              {roamItems.map((item) => (
+                <button
+                  key={item.id}
+                  onClick={() => navigate('/search')}
+                  className="text-left border border-border rounded-[10px] p-4 hover:bg-bg-secondary transition-colors group"
+                >
+                  <div className="flex items-center gap-2 mb-2">
+                    <FileText size={12} className="text-accent-primary flex-shrink-0" />
+                    <span className="text-xs font-semibold text-text-primary truncate group-hover:text-accent-primary transition-colors">{item.title}</span>
+                  </div>
+                  {(item.category || item.subcategory) && (
+                    <span className="text-[9px] font-bold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded inline-block mb-2">
+                      {item.subcategory ? `${item.category}/${item.subcategory}` : item.category}
+                    </span>
+                  )}
+                  <p className="text-[11px] text-text-tertiary line-clamp-3 leading-relaxed">{item.preview}</p>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Trend chart + Categories */}
         <div className="flex gap-6">

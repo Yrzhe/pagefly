@@ -492,6 +492,61 @@ async def full_text_search(body: dict):
     return {"keyword": keyword, "total": len(results), "results": results}
 
 
+# ── Daily Roam ──
+
+@app.get("/api/roam", dependencies=[Depends(verify_token)])
+async def get_daily_roam():
+    """Get random documents for knowledge resurfacing."""
+    conn = db.get_connection()
+    try:
+        # Prefer older documents (ingested >7 days ago)
+        rows = conn.execute(
+            "SELECT id, title, category, subcategory, current_path, ingested_at "
+            "FROM documents WHERE status != 'error' "
+            "AND ingested_at < date('now', '-7 days') "
+            "ORDER BY RANDOM() LIMIT 3"
+        ).fetchall()
+
+        # Fallback: if not enough old docs, fill with any
+        if len(rows) < 3:
+            existing_ids = {r["id"] for r in rows}
+            extra = conn.execute(
+                "SELECT id, title, category, subcategory, current_path, ingested_at "
+                "FROM documents WHERE status != 'error' "
+                "ORDER BY RANDOM() LIMIT ?",
+                (3 - len(rows),),
+            ).fetchall()
+            for r in extra:
+                if r["id"] not in existing_ids:
+                    rows.append(r)
+    finally:
+        conn.close()
+
+    results = []
+    for row in rows:
+        preview = ""
+        if row["current_path"]:
+            md_path = Path(row["current_path"]) / "document.md"
+            if md_path.exists():
+                raw = md_path.read_text(encoding="utf-8")
+                # Strip YAML frontmatter if present
+                if raw.startswith("---"):
+                    parts = raw.split("---", 2)
+                    raw = parts[2].strip() if len(parts) >= 3 else raw
+                preview = raw[:500]
+
+        results.append({
+            "id": row["id"],
+            "title": row["title"],
+            "category": row["category"] or "",
+            "subcategory": row["subcategory"] or "",
+            "preview": preview,
+            "ingested_at": row["ingested_at"] or "",
+        })
+
+    return {"items": results}
+
+
 # ── Schedules ──
 
 @app.get("/api/schedules", dependencies=[Depends(verify_token)])
