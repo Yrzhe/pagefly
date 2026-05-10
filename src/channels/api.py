@@ -1499,6 +1499,59 @@ async def web_chat(body: dict):
     if len(session.messages) > 100:
         session.messages = session.messages[-100:]
 
+    # Handle /roam command locally (no LLM needed)
+    if user_message.strip() == "/roam":
+        from datetime import datetime as dt, timezone
+        conn = db.get_connection()
+        rows = conn.execute(
+            "SELECT id, title, category, subcategory, current_path "
+            "FROM documents WHERE status != 'error' "
+            "AND ingested_at < date('now', '-7 days') "
+            "ORDER BY RANDOM() LIMIT 3"
+        ).fetchall()
+        if len(rows) < 3:
+            extra = conn.execute(
+                "SELECT id, title, category, subcategory, current_path "
+                "FROM documents WHERE status != 'error' "
+                "ORDER BY RANDOM() LIMIT ?",
+                (3 - len(rows),),
+            ).fetchall()
+            existing = {r["id"] for r in rows}
+            rows = list(rows) + [r for r in extra if r["id"] not in existing]
+        conn.close()
+
+        if not rows:
+            roam_reply = "No documents available for roam yet."
+        else:
+            lines = ["**Random Roam**\n"]
+            for i, row in enumerate(rows, 1):
+                title = row["title"] or "(untitled)"
+                tag = row["category"] or ""
+                if row["subcategory"]:
+                    tag += f"/{row['subcategory']}"
+                preview = ""
+                if row["current_path"]:
+                    md_path = Path(row["current_path"]) / "document.md"
+                    if md_path.exists():
+                        raw = md_path.read_text(encoding="utf-8")
+                        if raw.startswith("---"):
+                            parts = raw.split("---", 2)
+                            raw = parts[2].strip() if len(parts) >= 3 else raw
+                        preview = raw[:200].replace("\n", " ")
+                lines.append(f"**{i}. {title}**")
+                if tag:
+                    lines.append(f"   [{tag}]")
+                if preview:
+                    lines.append(f"   {preview}...")
+                lines.append("")
+            roam_reply = "\n".join(lines)
+
+        ts = dt.now(timezone.utc).astimezone().isoformat()
+        session.messages.append({"role": "user", "content": "/roam", "ts": ts})
+        session.messages.append({"role": "assistant", "content": roam_reply, "ts": ts})
+        db.save_session(chat_id, session.messages)
+        return {"response": roam_reply, "messages": session.messages}
+
     response = await ask(user_message, session)
 
     # Persist

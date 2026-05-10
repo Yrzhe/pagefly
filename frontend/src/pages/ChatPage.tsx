@@ -14,6 +14,7 @@ interface Message {
 const SLASH_COMMANDS = [
   { cmd: '/search', desc: 'Search documents by keyword', args: '<keyword>' },
   { cmd: '/status', desc: 'Show knowledge base stats', args: '' },
+  { cmd: '/roam', desc: 'Random knowledge resurfacing', args: '' },
   { cmd: '/save', desc: 'Save conversation as memo', args: '' },
   { cmd: '/reset', desc: 'Clear conversation context', args: '' },
 ]

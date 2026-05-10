@@ -161,6 +161,7 @@ async def _cmd_start(update: Update, context) -> None:
         "Send me a message to query your knowledge base\\.\n\n"
         "*Commands:*\n"
         "/search <keyword> \\— search documents\n"
+        "/roam \\— random knowledge resurfacing\n"
         "/status \\— show knowledge base stats\n"
         "/reset \\— clear conversation context\n\n"
         "You can also upload PDF/text files to ingest them\\."
@@ -250,6 +251,79 @@ async def _cmd_status(update: Update, context) -> None:
         f"Operations logged: {ops_count}"
     )
     await update.message.reply_text(_escape_md(text).replace(r"\*", "*"), parse_mode=ParseMode.MARKDOWN_V2)
+
+
+async def _cmd_roam(update: Update, context) -> None:
+    """Handle /roam command — random knowledge resurfacing."""
+    from src.storage.db import get_connection
+
+    chat_id = update.effective_chat.id
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT id, title, category, subcategory, current_path "
+        "FROM documents WHERE status != 'error' "
+        "AND ingested_at < date('now', '-7 days') "
+        "ORDER BY RANDOM() LIMIT 3"
+    ).fetchall()
+    if len(rows) < 3:
+        existing = {r["id"] for r in rows}
+        extra = conn.execute(
+            "SELECT id, title, category, subcategory, current_path "
+            "FROM documents WHERE status != 'error' "
+            "ORDER BY RANDOM() LIMIT ?",
+            (3 - len(rows),),
+        ).fetchall()
+        rows = list(rows) + [r for r in extra if r["id"] not in existing]
+    conn.close()
+
+    if not rows:
+        await update.message.reply_text("No documents available yet.")
+        return
+
+    lines = ["**Random Roam**\n"]
+    doc_summaries = []
+    for i, row in enumerate(rows, 1):
+        title = row["title"] or "(untitled)"
+        tag = row["category"] or ""
+        if row["subcategory"]:
+            tag += f"/{row['subcategory']}"
+        preview = ""
+        if row["current_path"]:
+            md_path = Path(row["current_path"]) / "document.md"
+            if md_path.exists():
+                raw = md_path.read_text(encoding="utf-8")
+                if raw.startswith("---"):
+                    parts = raw.split("---", 2)
+                    raw = parts[2].strip() if len(parts) >= 3 else raw
+                preview = raw[:200].replace("\n", " ")
+        lines.append(f"**{i}. {title}**")
+        if tag:
+            lines.append(f"   [{tag}]")
+        if preview:
+            lines.append(f"   {preview}...")
+        lines.append("")
+        doc_summaries.append(f"{title} [{tag}]: {preview[:100]}")
+
+    text = "\n".join(lines)
+    await update.message.reply_text(
+        _escape_md(text).replace(r"\*", "*"),
+        parse_mode=ParseMode.MARKDOWN_V2,
+    )
+
+    # Inject into chat context
+    try:
+        session = _get_session(chat_id)
+        ts = datetime.now(timezone.utc).astimezone().isoformat()
+        ctx = (
+            "[System: User used /roam. These documents were resurfaced:\n"
+            + "\n".join(f"- {s}" for s in doc_summaries)
+            + "\nUser may want to discuss these.]"
+        )
+        session.messages.append({"role": "user", "content": "/roam", "ts": ts})
+        session.messages.append({"role": "assistant", "content": ctx, "ts": ts})
+        _persist_session(chat_id)
+    except Exception:
+        pass
 
 
 async def _cmd_search(update: Update, context) -> None:
@@ -778,6 +852,7 @@ def run_bot() -> None:
     app.add_handler(CommandHandler("reset", _cmd_reset))
     app.add_handler(CommandHandler("status", _cmd_status))
     app.add_handler(CommandHandler("search", _cmd_search))
+    app.add_handler(CommandHandler("roam", _cmd_roam))
 
     # Inline keyboard callbacks (approval flow)
     app.add_handler(CallbackQueryHandler(_handle_callback))
@@ -817,6 +892,7 @@ async def start_bot() -> Application:
     app.add_handler(CommandHandler("reset", _cmd_reset))
     app.add_handler(CommandHandler("status", _cmd_status))
     app.add_handler(CommandHandler("search", _cmd_search))
+    app.add_handler(CommandHandler("roam", _cmd_roam))
     app.add_handler(CallbackQueryHandler(_handle_callback))
     app.add_handler(MessageHandler(filters.Document.ALL, _handle_document))
     app.add_handler(MessageHandler(filters.PHOTO, _handle_photo))
