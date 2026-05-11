@@ -3,10 +3,27 @@
 import json
 from pathlib import Path
 
+from src.shared.config import DATA_DIR
 from src.shared.logger import get_logger
 from src.storage import db
 
 logger = get_logger("shared.roam")
+
+# Known container data prefix — DB stores paths like /app/data/...
+_CONTAINER_DATA = "/app/data/"
+
+
+def _resolve_db_path(db_path: str) -> Path:
+    """Translate a DB file_path to a local filesystem path.
+
+    DB may store /app/data/... (container) while host has a different root.
+    """
+    if not db_path:
+        return Path(db_path)
+    if db_path.startswith(_CONTAINER_DATA):
+        relative = db_path[len(_CONTAINER_DATA):]
+        return DATA_DIR / relative
+    return Path(db_path)
 
 
 def _strip_frontmatter(raw: str) -> str:
@@ -32,13 +49,13 @@ def _find_summary_for_doc(doc_id: str) -> str | None:
     conn.close()
 
     for row in rows:
-        meta_path = Path(row["file_path"]) / "metadata.json"
+        meta_path = _resolve_db_path(row["file_path"]) / "metadata.json"
         if not meta_path.exists():
             continue
         try:
             meta = json.loads(meta_path.read_text(encoding="utf-8"))
             if doc_id in meta.get("source_document_ids", []):
-                md_path = Path(row["file_path"]) / "document.md"
+                md_path = _resolve_db_path(row["file_path"]) / "document.md"
                 if md_path.exists():
                     raw = md_path.read_text(encoding="utf-8")
                     return _strip_frontmatter(raw)
@@ -51,7 +68,7 @@ def _read_doc_preview(current_path: str, max_chars: int = 500) -> str:
     """Read raw document preview as fallback when no summary exists."""
     if not current_path:
         return ""
-    md_path = Path(current_path) / "document.md"
+    md_path = _resolve_db_path(current_path) / "document.md"
     if not md_path.exists():
         return ""
     raw = md_path.read_text(encoding="utf-8")

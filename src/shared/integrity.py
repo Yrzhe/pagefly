@@ -111,6 +111,19 @@ def check_document(doc_dir: Path) -> IntegrityReport:
     return report
 
 
+def _relative_data_path(path: str) -> str:
+    """Extract the relative path after 'data/' for path comparison.
+
+    This avoids false mismatches between host (/root/.../data/knowledge/...)
+    and container (/app/data/knowledge/...) paths.
+    """
+    for marker in ("/data/knowledge/", "/data/wiki/", "/data/raw/", "/data/workspace/"):
+        idx = path.find(marker)
+        if idx >= 0:
+            return path[idx:]
+    return path
+
+
 def _check_knowledge_db_sync(
     doc_id: str, doc_dir: Path, meta: dict, report: IntegrityReport
 ) -> None:
@@ -122,8 +135,8 @@ def _check_knowledge_db_sync(
 
     db_path = db_doc.get("current_path", "")
     actual_path = str(doc_dir)
-    if db_path and db_path != actual_path:
-        # Auto-fix: update DB path
+    # Compare relative paths to avoid host/container prefix mismatch
+    if db_path and _relative_data_path(db_path) != _relative_data_path(actual_path):
         db.update_document(doc_id, current_path=actual_path)
         report.auto_fixed.append(
             f"{doc_dir.name}: DB path updated ({db_path} → {actual_path})"
@@ -148,7 +161,8 @@ def _check_wiki_db_sync(
 
     db_path = row["file_path"]
     actual_path = str(doc_dir)
-    if db_path and db_path != actual_path:
+    # Compare relative paths to avoid host/container prefix mismatch
+    if db_path and _relative_data_path(db_path) != _relative_data_path(actual_path):
         db.update_wiki_article(doc_id, file_path=actual_path)
         report.auto_fixed.append(
             f"{doc_dir.name}: DB file_path updated ({db_path} → {actual_path})"
