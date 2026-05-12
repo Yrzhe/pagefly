@@ -161,7 +161,7 @@ async def _cmd_start(update: Update, context) -> None:
         "*PageFly Knowledge OS*\n\n"
         "Send me a message to query your knowledge base\\.\n\n"
         "*Commands:*\n"
-        "/search <keyword> \\— search documents\n"
+        "/search \\<keyword\\> \\— search documents\n"
         "/roam \\— random knowledge resurfacing\n"
         "/status \\— show knowledge base stats\n"
         "/reset \\— clear conversation context\n\n"
