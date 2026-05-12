@@ -144,7 +144,8 @@ def _format_response(text: str) -> str:
 async def _post_init(app: Application) -> None:
     """Register bot commands so they show in the / menu."""
     commands = [
-        BotCommand("start", "Show help"),
+        BotCommand("help", "Show commands"),
+        BotCommand("roam", "Random knowledge resurfacing"),
         BotCommand("search", "Search documents by keyword"),
         BotCommand("status", "Show knowledge base stats"),
         BotCommand("save", "Save conversation as memo"),
@@ -822,6 +823,7 @@ def run_bot() -> None:
 
     # Command handlers
     app.add_handler(CommandHandler("start", _cmd_start))
+    app.add_handler(CommandHandler("help", _cmd_start))
     app.add_handler(CommandHandler("save", _cmd_save))
     app.add_handler(CommandHandler("reset", _cmd_reset))
     app.add_handler(CommandHandler("status", _cmd_status))
@@ -862,6 +864,7 @@ async def start_bot() -> Application:
     app.post_init = _post_init
 
     app.add_handler(CommandHandler("start", _cmd_start))
+    app.add_handler(CommandHandler("help", _cmd_start))
     app.add_handler(CommandHandler("save", _cmd_save))
     app.add_handler(CommandHandler("reset", _cmd_reset))
     app.add_handler(CommandHandler("status", _cmd_status))
