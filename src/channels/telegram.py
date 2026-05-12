@@ -266,10 +266,12 @@ async def _cmd_roam(update: Update, context) -> None:
         return
 
     text = format_roam_message(items)
-    await update.message.reply_text(
-        _escape_md(text).replace(r"\*", "*"),
-        parse_mode=ParseMode.MARKDOWN_V2,
-    )
+    try:
+        formatted = _format_response(text)
+        await update.message.reply_text(formatted, parse_mode=ParseMode.MARKDOWN_V2)
+    except Exception:
+        # Fallback to plain text if formatting fails
+        await update.message.reply_text(text)
 
     # Inject into chat context
     try:
