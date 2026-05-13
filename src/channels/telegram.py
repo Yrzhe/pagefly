@@ -265,23 +265,28 @@ async def _cmd_roam(update: Update, context) -> None:
         await update.message.reply_text("No documents available yet.")
         return
 
-    text = format_roam_message(items)
-    try:
-        formatted = _format_response(text)
-        await update.message.reply_text(formatted, parse_mode=ParseMode.MARKDOWN_V2)
-    except Exception:
-        # Fallback to plain text if formatting fails
-        await update.message.reply_text(text)
+    # Send each article as a separate message to avoid Telegram's 4096 char limit
+    for i, item in enumerate(items, 1):
+        article_type = item.get("preview_type", "")
+        preview = item["preview"][:1500].rstrip()
+        if len(item["preview"]) > 1500:
+            preview += "\n\n_(full article in knowledge base)_"
+        single = f"**{i}. {item['title']}**\n[{article_type}]\n\n{preview}"
+        try:
+            formatted = _format_response(single)
+            await update.message.reply_text(formatted, parse_mode=ParseMode.MARKDOWN_V2)
+        except Exception:
+            await update.message.reply_text(single[:4000])
 
-    # Inject into chat context
+    # Inject into chat context — concise summary, not full content
     try:
         session = _get_session(chat_id)
         ts = datetime.now(timezone.utc).astimezone().isoformat()
-        summaries = [f"{it['title']} [{it['category']}]: {it['preview'][:100]}" for it in items]
+        summaries = [f"{it['title']} [{it.get('preview_type','')}]: {it['preview'][:200]}" for it in items]
         ctx = (
-            "[System: User used /roam. These documents were resurfaced:\n"
+            "[System: User used /roam. These wiki articles were resurfaced:\n"
             + "\n".join(f"- {s}" for s in summaries)
-            + "\nUser may want to discuss these.]"
+            + "\nUser may want to discuss these. Use read_wiki_index or list_wiki_articles to get full content if needed.]"
         )
         session.messages.append({"role": "user", "content": "/roam", "ts": ts})
         session.messages.append({"role": "assistant", "content": ctx, "ts": ts})

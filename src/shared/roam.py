@@ -127,8 +127,11 @@ def pick_roam_docs(count: int = 3) -> list[dict]:
     return results
 
 
-def format_roam_message(items: list[dict], max_preview: int = 600) -> str:
-    """Format roam items into a markdown message."""
+def format_roam_message(items: list[dict], max_preview: int = 800) -> str:
+    """Format roam items into a markdown message.
+
+    Each article preview is capped to avoid Telegram's 4096 char limit.
+    """
     if not items:
         return "No articles available for roam yet."
 
@@ -137,7 +140,7 @@ def format_roam_message(items: list[dict], max_preview: int = 600) -> str:
         article_type = item.get("preview_type", item.get("category", ""))
         preview = item["preview"][:max_preview].rstrip()
         if len(item["preview"]) > max_preview:
-            preview += "..."
+            preview += "\n\n_(full article in knowledge base)_"
 
         lines.append(f"**{i}. {item['title']}**")
         if article_type:
