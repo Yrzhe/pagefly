@@ -106,7 +106,7 @@ async def _run_daily_roam() -> None:
     """Scheduled task: push random knowledge documents for resurfacing."""
     logger.info("Daily Roam starting...")
     try:
-        from src.shared.roam import pick_roam_docs, format_roam_message
+        from src.shared.roam import pick_roam_docs, publish_roam_page
         from src.shared.config import TELEGRAM_CHAT_ID
 
         items = pick_roam_docs(count=3)
@@ -114,10 +114,25 @@ async def _run_daily_roam() -> None:
             logger.info("Daily Roam: no documents to resurface")
             return
 
-        message = format_roam_message(items)
-        await notify(message)
+        # Publish rendered HTML page
+        page_url = publish_roam_page(items)
 
-        # Inject into chat context so Query Agent knows what was pushed
+        # Build concise notification
+        lines = ["**Daily Random Roam**\n"]
+        for i, item in enumerate(items, 1):
+            article_type = item.get("preview_type", "")
+            teaser = item["preview"][:150].replace("\n", " ").strip()
+            if len(item["preview"]) > 150:
+                teaser += "..."
+            lines.append(f"**{i}. {item['title']}** [{article_type}]")
+            lines.append(f"   {teaser}")
+            lines.append("")
+        if page_url:
+            lines.append(f"Read full articles: {page_url}")
+
+        await notify("\n".join(lines))
+
+        # Inject into chat context
         if TELEGRAM_CHAT_ID:
             try:
                 from src.channels.telegram import _get_session, _persist_session
@@ -126,12 +141,14 @@ async def _run_daily_roam() -> None:
                 chat_id = int(TELEGRAM_CHAT_ID)
                 session = _get_session(chat_id)
                 ts = dt.now(timezone.utc).astimezone().isoformat()
-                summaries = [f"{it['title']} [{it['category']}]: {it['preview'][:100]}" for it in items]
+                summaries = [f"{it['title']} [{it.get('preview_type','')}]: {it['preview'][:200]}" for it in items]
+                link_note = f"\nFull page: {page_url}" if page_url else ""
                 context = (
                     "[System: Daily Random Roam was just sent to the user. "
-                    "These documents were resurfaced for review:\n"
+                    "These wiki articles were resurfaced:\n"
                     + "\n".join(f"- {s}" for s in summaries)
-                    + "\nThe user may want to discuss these topics.]"
+                    + link_note
+                    + "\nThe user may want to discuss these.]"
                 )
                 session.messages.append({"role": "assistant", "content": context, "ts": ts})
                 _persist_session(chat_id)

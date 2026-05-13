@@ -256,7 +256,7 @@ async def _cmd_status(update: Update, context) -> None:
 
 async def _cmd_roam(update: Update, context) -> None:
     """Handle /roam command — random knowledge resurfacing."""
-    from src.shared.roam import pick_roam_docs, format_roam_message
+    from src.shared.roam import pick_roam_docs, publish_roam_page
 
     chat_id = update.effective_chat.id
     items = pick_roam_docs(count=3)
@@ -265,28 +265,42 @@ async def _cmd_roam(update: Update, context) -> None:
         await update.message.reply_text("No documents available yet.")
         return
 
-    # Send each article as a separate message to avoid Telegram's 4096 char limit
+    # Publish full rendered page
+    page_url = publish_roam_page(items)
+
+    # Build concise Telegram message: titles + summaries + link
+    lines = ["**Random Roam**\n"]
     for i, item in enumerate(items, 1):
         article_type = item.get("preview_type", "")
-        preview = item["preview"][:1500].rstrip()
-        if len(item["preview"]) > 1500:
-            preview += "\n\n_(full article in knowledge base)_"
-        single = f"**{i}. {item['title']}**\n[{article_type}]\n\n{preview}"
-        try:
-            formatted = _format_response(single)
-            await update.message.reply_text(formatted, parse_mode=ParseMode.MARKDOWN_V2)
-        except Exception:
-            await update.message.reply_text(single[:4000])
+        # Use first 150 chars as teaser
+        teaser = item["preview"][:150].replace("\n", " ").strip()
+        if len(item["preview"]) > 150:
+            teaser += "..."
+        lines.append(f"**{i}. {item['title']}** [{article_type}]")
+        lines.append(f"   {teaser}")
+        lines.append("")
 
-    # Inject into chat context — concise summary, not full content
+    if page_url:
+        lines.append(f"Read full articles: {page_url}")
+
+    text = "\n".join(lines)
+    try:
+        formatted = _format_response(text)
+        await update.message.reply_text(formatted, parse_mode=ParseMode.MARKDOWN_V2)
+    except Exception:
+        await update.message.reply_text(text[:4000])
+
+    # Inject into chat context
     try:
         session = _get_session(chat_id)
         ts = datetime.now(timezone.utc).astimezone().isoformat()
         summaries = [f"{it['title']} [{it.get('preview_type','')}]: {it['preview'][:200]}" for it in items]
+        link_note = f"\nFull page: {page_url}" if page_url else ""
         ctx = (
             "[System: User used /roam. These wiki articles were resurfaced:\n"
             + "\n".join(f"- {s}" for s in summaries)
-            + "\nUser may want to discuss these. Use read_wiki_index or list_wiki_articles to get full content if needed.]"
+            + link_note
+            + "\nUser may want to discuss these. Use list_wiki_articles to get full content if needed.]"
         )
         session.messages.append({"role": "user", "content": "/roam", "ts": ts})
         session.messages.append({"role": "assistant", "content": ctx, "ts": ts})

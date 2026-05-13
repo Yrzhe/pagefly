@@ -497,8 +497,10 @@ async def full_text_search(body: dict):
 @app.get("/api/roam", dependencies=[Depends(verify_token)])
 async def get_daily_roam():
     """Get random documents for knowledge resurfacing."""
-    from src.shared.roam import pick_roam_docs
-    return {"items": pick_roam_docs(count=3)}
+    from src.shared.roam import pick_roam_docs, publish_roam_page
+    items = pick_roam_docs(count=3)
+    page_url = publish_roam_page(items) if items else None
+    return {"items": items, "page_url": page_url}
 
 
 # ── Schedules ──
