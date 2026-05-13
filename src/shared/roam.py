@@ -268,21 +268,24 @@ def publish_roam_page(items: list[dict]) -> str | None:
         resp.raise_for_status()
         data = resp.json()
 
-        site_url = data.get("url", "")
-        uploads = data.get("uploads", [])
-        finalize_url = data.get("finalizeUrl", "")
-        version_id = data.get("versionId", "")
+        site_url = data.get("siteUrl", "")
+        upload = data.get("upload", {})
+        uploads = upload.get("uploads", [])
+        finalize_url = upload.get("finalizeUrl", "")
+        version_id = upload.get("versionId", "")
 
         if not uploads or not finalize_url:
             logger.warning("here.now: missing uploads or finalizeUrl in response")
             return None
 
         # Step 2: Upload HTML
-        upload_url = uploads[0].get("uploadUrl", "")
+        upload_info = uploads[0]
+        upload_url = upload_info.get("url", "")
+        upload_headers = upload_info.get("headers", {})
         resp2 = httpx.put(
             upload_url,
             content=html_bytes,
-            headers={"Content-Type": "text/html; charset=utf-8"},
+            headers=upload_headers,
             timeout=15,
         )
         resp2.raise_for_status()
