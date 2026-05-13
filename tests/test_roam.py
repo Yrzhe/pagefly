@@ -1,4 +1,4 @@
-"""Tests for Daily Random Roam — weighted selection, dedup, formatting."""
+"""Tests for Daily Random Roam — weighted selection from wiki articles, dedup, formatting."""
 
 import json
 from unittest.mock import patch, MagicMock
@@ -9,10 +9,10 @@ from src.storage.db import init_db, get_connection
 
 
 class TestRoamSelection:
-    """Test the weighted random selection with dedup."""
+    """Test the weighted random selection from wiki concept/connection/insight articles."""
 
     def test_pick_returns_results(self):
-        """pick_roam_docs returns documents from the DB."""
+        """pick_roam_docs returns wiki articles."""
         init_db()
         from src.shared.roam import pick_roam_docs
         items = pick_roam_docs(count=3)
@@ -21,17 +21,26 @@ class TestRoamSelection:
         for item in items:
             assert "id" in item
             assert "title" in item
-            assert "preview" in item
+            assert item.get("preview_type") in ("concept", "connection", "insight", "")
 
-    def test_pick_records_history(self):
-        """Picked docs are recorded in roam_history."""
+    def test_excludes_review_lint_summary(self):
+        """Only concept/connection/insight articles are selected, never review/lint/summary."""
         init_db()
         from src.shared.roam import pick_roam_docs
-        from src.storage.db import get_connection
+        # Run multiple times to increase confidence
+        for _ in range(5):
+            items = pick_roam_docs(count=3)
+            for item in items:
+                assert item.get("preview_type") not in ("review", "lint", "summary")
+
+    def test_pick_records_history(self):
+        """Picked articles are recorded in roam_history."""
+        init_db()
+        from src.shared.roam import pick_roam_docs
 
         items = pick_roam_docs(count=1)
         if not items:
-            pytest.skip("No documents in DB")
+            pytest.skip("No wiki articles in DB")
 
         conn = get_connection()
         row = conn.execute(
@@ -42,46 +51,24 @@ class TestRoamSelection:
         assert row is not None
 
     def test_dedup_excludes_recent(self):
-        """Recently roamed docs are excluded from next pick."""
+        """Recently roamed articles are excluded from next pick."""
         init_db()
         from src.shared.roam import pick_roam_docs
-        from src.storage.db import get_connection, record_roam
 
-        # Count total available docs
         conn = get_connection()
         total = conn.execute(
-            "SELECT COUNT(*) FROM documents WHERE status != 'error'"
+            "SELECT COUNT(*) FROM wiki_articles WHERE article_type IN ('concept','connection','insight')"
         ).fetchone()[0]
         conn.close()
 
         if total <= 3:
-            pytest.skip("Not enough documents to test dedup")
+            pytest.skip("Not enough wiki articles to test dedup")
 
-        # Pick once
         first = pick_roam_docs(count=3)
-        first_ids = {it["id"] for it in first}
-
-        # Pick again — should try to avoid the same docs
         second = pick_roam_docs(count=3)
-        second_ids = {it["id"] for it in second}
-
-        # With >6 docs, at least one should differ (probabilistic but very likely)
-        if total > 6:
-            # Allow this to pass even if they happen to overlap —
-            # the important thing is the mechanism exists
-            pass  # Just verify no crash
-
-    def test_weighted_favors_older(self):
-        """Weighted selection gives higher probability to older docs.
-        This is a statistical test — we verify the mechanism exists,
-        not exact probabilities."""
-        init_db()
-        from src.shared.roam import pick_roam_docs
-
-        # Just verify it doesn't crash with the weighting
-        for _ in range(3):
-            items = pick_roam_docs(count=3)
-            assert isinstance(items, list)
+        # Both should work without crash
+        assert isinstance(first, list)
+        assert isinstance(second, list)
 
 
 class TestRoamFormatting:
@@ -90,29 +77,29 @@ class TestRoamFormatting:
         from src.shared.roam import format_roam_message
 
         items = [
-            {"id": "a", "title": "Test Doc", "category": "tech", "subcategory": "ai", "preview": "Some content here", "ingested_at": "2026-01-01"},
-            {"id": "b", "title": "Another", "category": "ideas", "subcategory": "", "preview": "More content", "ingested_at": "2026-01-02"},
+            {"id": "a", "title": "Test Concept", "category": "concept", "subcategory": "", "preview": "Some insight here", "preview_type": "concept", "ingested_at": "2026-01-01"},
+            {"id": "b", "title": "A ↔ B Connection", "category": "connection", "subcategory": "", "preview": "How they relate", "preview_type": "connection", "ingested_at": "2026-01-02"},
         ]
         result = format_roam_message(items)
         assert "**Random Roam**" in result
-        assert "Test Doc" in result
-        assert "Another" in result
-        assert "[tech/ai]" in result
+        assert "Test Concept" in result
+        assert "[concept]" in result
+        assert "[connection]" in result
 
     def test_format_empty(self):
         """Empty items returns fallback message."""
         from src.shared.roam import format_roam_message
         result = format_roam_message([])
-        assert "No documents" in result
+        assert "No articles" in result
 
     def test_preview_truncation(self):
         """Preview is truncated to max_preview chars."""
         from src.shared.roam import format_roam_message
 
-        items = [{"id": "x", "title": "Long", "category": "t", "subcategory": "", "preview": "x" * 1000, "ingested_at": ""}]
-        result = format_roam_message(items, max_preview=50)
-        # The preview in the output should be truncated
-        assert len(result) < 1000
+        items = [{"id": "x", "title": "Long", "category": "concept", "subcategory": "", "preview": "x" * 2000, "preview_type": "concept", "ingested_at": ""}]
+        result = format_roam_message(items, max_preview=100)
+        assert "..." in result
+        assert len(result) < 2000
 
 
 class TestRoamDBHelpers:
@@ -130,6 +117,5 @@ class TestRoamDBHelpers:
         """get_recently_roamed returns empty set with no history."""
         init_db()
         from src.storage.db import get_recently_roamed
-        # Should not crash even if table is fresh
         result = get_recently_roamed(days=14)
         assert isinstance(result, set)
