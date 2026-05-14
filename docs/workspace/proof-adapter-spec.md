@@ -137,7 +137,7 @@ CREATE TABLE workspace_comments (
 );
 CREATE INDEX idx_ws_comments_doc ON workspace_comments(doc_id);
 
--- Pending change（同文档同时只允许一条）
+-- Suggestions（agent 自己判断是否创建，不限数量）
 CREATE TABLE workspace_suggestions (
     id TEXT PRIMARY KEY,
     doc_id TEXT NOT NULL REFERENCES workspace_documents(id) ON DELETE CASCADE,
@@ -148,14 +148,8 @@ CREATE TABLE workspace_suggestions (
     content TEXT NOT NULL DEFAULT '',          -- 替换内容
     status TEXT NOT NULL DEFAULT 'pending',     -- pending | accepted | rejected
     created_at TEXT NOT NULL,
-    resolved_at TEXT,
-    UNIQUE(doc_id, status) -- 同文档只允许一条 pending
-    -- Note: UNIQUE constraint on (doc_id) WHERE status='pending' 
-    --   需要用 partial index 实现，见下方
+    resolved_at TEXT
 );
--- SQLite partial unique index: 同文档同时只允许一条 pending
-CREATE UNIQUE INDEX idx_ws_suggestions_one_pending 
-    ON workspace_suggestions(doc_id) WHERE status = 'pending';
 
 -- 文档版本历史（每次保存记录）
 CREATE TABLE workspace_revisions (
@@ -211,64 +205,17 @@ CREATE INDEX idx_ws_revisions_doc ON workspace_revisions(doc_id, revision DESC);
 |--------|------|------|
 | POST | `/api/workspace/documents/:id/publish` | 发布到外部平台 |
 
-## 7. 待 yrzhe 拍板的决策点
+## 7. 决策点（已拍板 2026-05-14）
 
-### D1: Tiptap 还是纯 textarea？
-
-Proof 用 ProseMirror（Tiptap 底层）。PageFly v1 是否需要 rich editor，还是先用 textarea + markdown preview？
-
-- **Option A**: Tiptap（完整 ProseMirror，支持 inline marks、评论高亮、suggestion diff）
-- **Option B**: Textarea + markdown preview split view（简单，评论只按行号锚定）
-
-**建议**: Option A — 评论锚定到文本 range 是核心交互，textarea 做不到。
-
-### D2: 同文档 pending suggestion 数量
-
-YRZ-191 说"同时只允许一条 pending"。Proof 不限制。
-
-- **Option A**: 严格一条（简单，无冲突）
-- **Option B**: 允许多条但不重叠 range（中等复杂度）
-
-**建议**: Option A — v1 先保守。
-
-### D3: Agent 响应方式
-
-当用户 @agent 或 Ask Copilot 时，agent 应该：
-
-- **Option A**: 只留评论（用户决定是否自己改）
-- **Option B**: 评论 + 自动创建 suggestion（用户 approve/reject）
-- **Option C**: Agent 自己决定是评论还是 suggestion
-
-**建议**: Option C — 让 agent 根据上下文判断。
-
-### D4: Workspace 文档和 knowledge 文档的关系
-
-- **Option A**: 独立表（workspace_documents），和 knowledge/ 无关
-- **Option B**: 复用 documents 表，加 `workspace: boolean` 字段
-
-**建议**: Option A — workspace 是创作区，knowledge 是存档区，生命周期不同。
-
-### D5: 版本历史粒度
-
-- **Option A**: 每次保存一条 revision（简单）
-- **Option B**: 每个 op 一条 revision（精细但复杂）
-
-**建议**: Option A — v1 保存级粒度够用。
-
-### D6: Output Pipeline 第一个目标平台
-
-- **Option A**: X (Twitter) — 你已有 @yrzhe_top
-- **Option B**: 微信公众号
-- **Option C**: yrzhe.top 博客
-
-**建议**: 你来定，哪个最常用就先做哪个。
-
-### D7: v1 是否需要实时协作（多光标）？
-
-- **Option A**: 不需要（异步：人编辑 → 保存 → agent 读取并响应）
-- **Option B**: 需要（Yjs CRDT，人和 agent 同时编辑）
-
-**建议**: Option A — v1 异步足够，实时协作是 v2 的事。
+| # | 问题 | 决定 |
+|---|------|------|
+| D1 | Editor | **Tiptap**（评论锚定需要 ProseMirror range） |
+| D2 | Pending suggestion 限制 | **不限制数量**，Agent 自己判断是否创建 suggestion |
+| D3 | Agent 响应方式 | **Agent 自己判断**是评论还是 suggestion |
+| D4 | workspace_documents | **独立表**，和 knowledge documents 分离 |
+| D5 | 版本历史粒度 | **每次保存一条** revision |
+| D6 | Output Pipeline 优先级 | **1) 博客导出**（MD + 图片压缩包） → 2) X → 3) 微信公众号 |
+| D7 | 实时协作 | **不需要** v1，异步模式 |
 
 ---
 
