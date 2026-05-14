@@ -6,6 +6,15 @@ WORKDIR /build
 COPY pyproject.toml ./
 RUN pip install --no-cache-dir --prefix=/install .
 
+# ── Frontend build stage ──
+FROM node:22-slim AS frontend
+
+WORKDIR /frontend
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+COPY frontend/ ./
+RUN npm run build
+
 # ── Runtime stage ──
 FROM python:3.11-slim
 
@@ -30,6 +39,9 @@ COPY src/ ./src/
 COPY config/ ./config/
 COPY data/demo/ ./data/demo/
 COPY pyproject.toml ./
+
+# Copy frontend build
+COPY --from=frontend /frontend/dist ./static/
 
 # Create non-root user and data directories
 RUN groupadd -r pagefly && useradd -r -g pagefly -d /app pagefly \

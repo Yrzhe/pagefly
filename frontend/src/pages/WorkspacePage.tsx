@@ -1,159 +1,246 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { FolderOpen, Trash2, ArrowRight, Plus, Save, Pencil, Image as ImageIcon, X } from 'lucide-react'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
+import { useEditor, EditorContent } from '@tiptap/react'
+import StarterKit from '@tiptap/starter-kit'
+import Placeholder from '@tiptap/extension-placeholder'
+import CharacterCount from '@tiptap/extension-character-count'
+import Image from '@tiptap/extension-image'
+import { Table } from '@tiptap/extension-table'
+import { TableRow } from '@tiptap/extension-table-row'
+import { TableHeader } from '@tiptap/extension-table-header'
+import { TableCell } from '@tiptap/extension-table-cell'
+import {
+  PenTool,
+  Plus,
+  Trash2,
+  Save,
+  Bold,
+  Italic,
+  Strikethrough,
+  Code,
+  CodeSquare,
+  List,
+  ListOrdered,
+  Quote,
+  Minus,
+  Undo2,
+  Redo2,
+  Heading1,
+  Heading2,
+  Heading3,
+  ImageIcon,
+  TableIcon,
+  Link,
+  Upload,
+  RowsIcon,
+  ColumnsIcon,
+  ArrowRight,
+  CheckCircle,
+  FileText,
+} from 'lucide-react'
 import api from '@/api/client'
 import { cn } from '@/lib/utils'
 
-interface WorkspaceFolder {
-  name: string
-  size: number
-  modified: number
-  image_count: number
+interface WsDoc {
+  id: string
+  title: string
+  status: string
+  revision: number
+  created_by: string
+  created_at: string
+  updated_at: string
 }
 
-interface WSImage {
-  name: string
-  size: number
+interface WsDocFull extends WsDoc {
+  content: string
 }
 
 export function WorkspacePage() {
-  const [folders, setFolders] = useState<WorkspaceFolder[]>([])
-  const [selected, setSelected] = useState<WorkspaceFolder | null>(null)
-  const [content, setContent] = useState('')
-  const [editContent, setEditContent] = useState('')
-  const [images, setImages] = useState<WSImage[]>([])
-  const [mode, setMode] = useState<'preview' | 'edit'>('preview')
+  const [docs, setDocs] = useState<WsDoc[]>([])
+  const [selected, setSelected] = useState<WsDocFull | null>(null)
+  const [title, setTitle] = useState('')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [renamingName, setRenamingName] = useState<string | null>(null)
-  const [renameValue, setRenameValue] = useState('')
-  const [showImages, setShowImages] = useState(false)
-  const renameRef = useRef<HTMLInputElement>(null)
-  const token = localStorage.getItem('pagefly_token') || ''
+  const [error, setError] = useState('')
 
-  const fetchFolders = useCallback(async () => {
+  const editor = useEditor({
+    extensions: [
+      StarterKit,
+      Placeholder.configure({ placeholder: 'Start writing...' }),
+      CharacterCount,
+      Image.configure({ inline: true, allowBase64: true }),
+      Table.configure({ resizable: true }),
+      TableRow,
+      TableHeader,
+      TableCell,
+    ],
+    content: '',
+    editorProps: {
+      attributes: {
+        class: 'prose-pagefly outline-none min-h-[60vh] px-8 py-6',
+      },
+    },
+  })
+
+  const fetchDocs = useCallback(async () => {
     try {
-      const { data } = await api.get('/api/workspace')
-      setFolders(data.folders || [])
-    } catch { setFolders([]) }
+      const { data } = await api.get('/api/workspace/documents')
+      setDocs(data.documents || [])
+    } catch { setDocs([]) }
     finally { setLoading(false) }
   }, [])
 
-  useEffect(() => { fetchFolders() }, [fetchFolders])
+  useEffect(() => { fetchDocs() }, [fetchDocs])
 
-  const selectFolder = useCallback(async (folder: WorkspaceFolder) => {
-    setSelected(folder)
-    setMode('preview')
-    setShowImages(false)
+  const selectDoc = useCallback(async (doc: WsDoc) => {
+    // Save current doc before switching
+    await handleSaveRef.current()
     try {
-      const [contentRes, imagesRes] = await Promise.all([
-        api.get(`/api/workspace/${folder.name}/content`),
-        api.get(`/api/workspace/${folder.name}/images`),
-      ])
-      setContent(contentRes.data.content || '')
-      setEditContent(contentRes.data.content || '')
-      setImages(imagesRes.data.images || [])
+      const { data } = await api.get(`/api/workspace/documents/${doc.id}`)
+      setSelected(data)
+      setTitle(data.title)
+      setError('')
+      editor?.commands.setContent(data.content || '<p></p>')
     } catch {
-      setContent('Failed to load.')
-      setImages([])
+      setError('Failed to load document')
     }
-  }, [])
+  }, [editor])
+
+  const handleCreate = async () => {
+    const name = prompt('Document title:')
+    if (!name?.trim()) return
+    try {
+      const { data } = await api.post('/api/workspace/documents', { title: name })
+      await fetchDocs()
+      // Select the newly created doc
+      const { data: full } = await api.get(`/api/workspace/documents/${data.id}`)
+      setSelected(full)
+      setTitle(full.title)
+      editor?.commands.setContent('<p></p>')
+    } catch { /* silent */ }
+  }
 
   const handleSave = useCallback(async () => {
-    if (!selected) return
+    if (!selected || !editor) return
+    const html = editor.getHTML()
+    // Skip save if nothing changed
+    if (html === selected.content && title === selected.title) return
     setSaving(true)
+    setError('')
     try {
-      await api.put(`/api/workspace/${selected.name}/content`, { content: editContent })
-      setContent(editContent)
-      setMode('preview')
-    } catch { /* silent */ }
-    finally { setSaving(false) }
-  }, [selected, editContent])
-
-  const handleCreate = useCallback(async () => {
-    const name = prompt('New document name:')
-    if (!name) return
-    try {
-      const { data } = await api.post('/api/workspace', { name })
-      await fetchFolders()
-      selectFolder({ name: data.name, size: 0, modified: Date.now() / 1000, image_count: 0 })
-    } catch { /* silent */ }
-  }, [fetchFolders, selectFolder])
-
-  const handleIngest = useCallback(async (folder: WorkspaceFolder) => {
-    if (!confirm(`Send "${folder.name}" to ingest pipeline?\nIt will be classified (with images) and moved to knowledge/.`)) return
-    try {
-      await api.post(`/api/workspace/${folder.name}/ingest`)
-      if (selected?.name === folder.name) { setSelected(null); setContent('') }
-      await fetchFolders()
-    } catch { /* silent */ }
-  }, [selected, fetchFolders])
-
-  const handleDelete = useCallback(async (folder: WorkspaceFolder) => {
-    if (!confirm(`Delete "${folder.name}" and all its images?`)) return
-    try {
-      await api.delete(`/api/workspace/${folder.name}`)
-      if (selected?.name === folder.name) { setSelected(null); setContent('') }
-      await fetchFolders()
-    } catch { /* silent */ }
-  }, [selected, fetchFolders])
-
-  const handleRename = useCallback(async (folder: WorkspaceFolder) => {
-    if (!renameValue.trim() || renameValue === folder.name) { setRenamingName(null); return }
-    try {
-      const { data } = await api.put(`/api/workspace/${folder.name}`, { name: renameValue })
-      if (selected?.name === folder.name) {
-        setSelected({ ...selected, name: data.name })
-      }
-      await fetchFolders()
-    } catch { /* silent */ }
-    setRenamingName(null)
-  }, [renameValue, selected, fetchFolders])
-
-  const handleUploadImage = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!selected || !e.target.files?.[0]) return
-    const file = e.target.files[0]
-    const form = new FormData()
-    form.append('file', file)
-    try {
-      const { data } = await api.post(`/api/workspace/${selected.name}/images`, form, {
-        headers: { 'Content-Type': 'multipart/form-data' },
+      const { data } = await api.patch(`/api/workspace/documents/${selected.id}`, {
+        title,
+        content: html,
+        revision: selected.revision,
       })
-      // Insert markdown reference at cursor or end
-      const ref = `\n${data.markdown}\n`
-      setEditContent((prev) => prev + ref)
-      setContent((prev) => prev + ref)
-      // Refresh images
-      const imgRes = await api.get(`/api/workspace/${selected.name}/images`)
-      setImages(imgRes.data.images || [])
-    } catch { /* silent */ }
-    e.target.value = ''
-  }, [selected])
+      setSelected((prev) => prev ? { ...prev, revision: data.revision, title, content: html } : prev)
+      fetchDocs()
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } } }
+      setError(err.response?.data?.detail || 'Save failed')
+    } finally {
+      setSaving(false)
+    }
+  }, [selected, editor, title, fetchDocs])
 
-  const handleDeleteImage = useCallback(async (imgName: string) => {
-    if (!selected || !confirm(`Delete image "${imgName}"?`)) return
+  // Auto-save: debounce 2s after editor changes
+  const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const handleSaveRef = useRef(handleSave)
+  handleSaveRef.current = handleSave
+
+  useEffect(() => {
+    if (!editor) return
+    const onUpdate = () => {
+      if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current)
+      autoSaveTimer.current = setTimeout(() => handleSaveRef.current(), 2000)
+    }
+    editor.on('update', onUpdate)
+    return () => { editor.off('update', onUpdate); if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current) }
+  }, [editor])
+
+  // Auto-save on title change (debounced)
+  useEffect(() => {
+    if (!selected) return
+    const t = setTimeout(() => handleSaveRef.current(), 2000)
+    return () => clearTimeout(t)
+  }, [title, selected])
+
+  // Save before switching docs or leaving page
+  useEffect(() => {
+    const onBeforeUnload = () => { handleSaveRef.current() }
+    window.addEventListener('beforeunload', onBeforeUnload)
+    return () => window.removeEventListener('beforeunload', onBeforeUnload)
+  }, [])
+
+  const handleStatusChange = useCallback(async (newStatus: string) => {
+    if (!selected) return
     try {
-      await api.delete(`/api/workspace/${selected.name}/images/${imgName}`)
-      setImages((prev) => prev.filter((i) => i.name !== imgName))
-    } catch { /* silent */ }
-  }, [selected])
+      const { data } = await api.patch(`/api/workspace/documents/${selected.id}`, {
+        status: newStatus,
+        revision: selected.revision,
+      })
+      setSelected((prev) => prev ? { ...prev, status: newStatus, revision: data.revision } : prev)
+      fetchDocs()
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } } }
+      setError(err.response?.data?.detail || 'Status update failed')
+    }
+  }, [selected, fetchDocs])
 
-  // Rewrite relative image paths for preview
-  const previewContent = selected
-    ? content.replace(
-        /!\[([^\]]*)\]\(images\/([^)]+)\)/g,
-        (_, alt, img) => `![${alt}](/api/workspace/${selected.name}/images/${img}?token=${token})`
-      )
-    : ''
+  const handleIngest = useCallback(async () => {
+    if (!selected || selected.status !== 'finished') return
+    if (!confirm(`Ingest "${selected.title}" into knowledge base?\nThe document will be classified and archived.`)) return
+    try {
+      await api.post(`/api/workspace/documents/${selected.id}/ingest`)
+      setSelected(null)
+      editor?.commands.setContent('')
+      fetchDocs()
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } } }
+      setError(err.response?.data?.detail || 'Ingest failed')
+    }
+  }, [selected, editor, fetchDocs])
+
+  const handleDelete = useCallback(async (doc: WsDoc) => {
+    if (!confirm(`Delete "${doc.title}"?`)) return
+    try {
+      await api.delete(`/api/workspace/documents/${doc.id}`)
+      if (selected?.id === doc.id) {
+        setSelected(null)
+        editor?.commands.setContent('')
+      }
+      fetchDocs()
+    } catch { /* silent */ }
+  }, [selected, editor, fetchDocs])
+
+  // Ctrl+S
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 's') {
+        e.preventDefault()
+        handleSave()
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [handleSave])
+
+  const charCount = editor?.storage.characterCount?.characters() ?? 0
+  const wordCount = editor?.storage.characterCount?.words() ?? 0
+  const isInTable = editor?.isActive('table') ?? false
+
+  const fmtDate = (iso: string) => {
+    try { return new Date(iso).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) }
+    catch { return iso }
+  }
 
   return (
     <div className="flex flex-col h-screen">
+      {/* Header */}
       <header className="flex items-center justify-between px-6 h-14 border-b border-border flex-shrink-0">
         <div className="flex items-center gap-3">
-          <FolderOpen size={16} className="text-accent-primary" />
+          <PenTool size={16} className="text-accent-primary" />
           <h1 className="font-heading text-[15px] font-bold text-text-primary">Workspace</h1>
-          <span className="text-xs text-text-tertiary">{folders.length} documents</span>
+          <span className="text-xs text-text-tertiary">{docs.length} documents</span>
         </div>
         <button onClick={handleCreate} className="flex items-center gap-1.5 px-4 py-2 bg-accent-primary rounded-[8px] text-xs font-semibold text-bg-primary hover:bg-accent-secondary transition-colors">
           <Plus size={13} /> New Document
@@ -161,116 +248,339 @@ export function WorkspacePage() {
       </header>
 
       <div className="flex flex-1 overflow-hidden">
-        {/* Folder list */}
-        <aside className="w-[280px] border-r border-border flex-shrink-0 overflow-y-auto">
+        {/* Document list */}
+        <aside className="w-[260px] border-r border-border flex-shrink-0 overflow-y-auto">
           <div className="p-3 flex flex-col gap-0.5">
             {loading ? (
               <p className="text-xs text-text-tertiary py-8 text-center">Loading...</p>
-            ) : folders.length === 0 ? (
+            ) : docs.length === 0 ? (
               <div className="py-12 text-center">
-                <FolderOpen size={32} className="text-text-tertiary mx-auto mb-3" />
+                <FileText size={32} className="text-text-tertiary mx-auto mb-3 opacity-40" />
                 <p className="text-sm text-text-tertiary">No documents yet</p>
-                <p className="text-xs text-text-tertiary mt-1">Click "New Document" to start writing</p>
+                <p className="text-xs text-text-tertiary mt-1">Click "New Document" to start</p>
               </div>
             ) : (
-              folders.map((f) => (
-                <div key={f.name} className={cn('group flex items-center gap-2 px-3 py-2.5 rounded-[8px] transition-colors', selected?.name === f.name ? 'bg-bg-tertiary' : 'hover:bg-bg-secondary')}>
-                  <button onClick={() => selectFolder(f)} className="flex-1 flex items-center gap-2.5 min-w-0 text-left">
-                    <FolderOpen size={13} className="text-accent-warm flex-shrink-0" />
+              docs.map((d) => (
+                <div
+                  key={d.id}
+                  className={cn(
+                    'group flex items-center gap-2 px-3 py-2.5 rounded-[8px] transition-colors cursor-pointer',
+                    selected?.id === d.id ? 'bg-bg-tertiary' : 'hover:bg-bg-secondary'
+                  )}
+                >
+                  <button onClick={() => selectDoc(d)} className="flex-1 flex items-center gap-2.5 min-w-0 text-left">
+                    <FileText size={13} className="text-accent-warm flex-shrink-0" />
                     <div className="flex flex-col min-w-0">
-                      {renamingName === f.name ? (
-                        <input ref={renameRef} value={renameValue} onChange={(e) => setRenameValue(e.target.value)}
-                          onBlur={() => handleRename(f)} onKeyDown={(e) => { if (e.key === 'Enter') handleRename(f); if (e.key === 'Escape') setRenamingName(null) }}
-                          className="text-xs font-medium text-text-primary bg-bg-primary border border-accent-primary rounded px-1 py-0.5 outline-none w-full"
-                          onClick={(e) => e.stopPropagation()} />
-                      ) : (
-                        <span className="text-xs font-medium text-text-primary truncate">{f.name}</span>
-                      )}
+                      <span className="text-xs font-medium text-text-primary truncate">{d.title || '(untitled)'}</span>
                       <span className="text-[10px] text-text-tertiary">
-                        {f.image_count > 0 && `${f.image_count} images · `}
-                        {(f.size / 1024).toFixed(1)} KB
+                        <StatusBadge status={d.status} /> · rev {d.revision} · {fmtDate(d.updated_at)}
                       </span>
                     </div>
                   </button>
-                  <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
-                    <button onClick={() => { setRenamingName(f.name); setRenameValue(f.name); setTimeout(() => renameRef.current?.focus(), 50) }} title="Rename" className="p-1 rounded hover:bg-bg-tertiary text-text-tertiary"><Pencil size={10} /></button>
-                    <button onClick={() => handleIngest(f)} title="Ingest" className="p-1 rounded hover:bg-accent-primary/10 text-accent-secondary"><ArrowRight size={10} /></button>
-                    <button onClick={() => handleDelete(f)} title="Delete" className="p-1 rounded hover:bg-error/10 text-error"><Trash2 size={10} /></button>
-                  </div>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); handleDelete(d) }}
+                    className="p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-error/10 text-text-tertiary hover:text-error transition-all flex-shrink-0"
+                  >
+                    <Trash2 size={10} />
+                  </button>
                 </div>
               ))
             )}
           </div>
         </aside>
 
-        {/* Editor / Preview */}
+        {/* Editor panel */}
         <div className="flex-1 flex flex-col overflow-hidden">
           {selected ? (
             <>
-              <div className="flex items-center justify-between px-6 py-3 border-b border-border flex-shrink-0">
-                <span className="text-xs font-medium text-text-primary">{selected.name}</span>
-                <div className="flex items-center gap-2">
-                  {saving && <span className="text-[10px] text-accent-primary">Saving...</span>}
-                  {mode === 'edit' ? (
-                    <>
-                      <label className="flex items-center gap-1 px-2.5 py-1.5 border border-border rounded-[6px] text-[11px] text-text-secondary hover:bg-bg-secondary transition-colors cursor-pointer">
-                        <ImageIcon size={11} /> Image
-                        <input type="file" className="hidden" accept="image/*" onChange={handleUploadImage} />
-                      </label>
-                      <button onClick={handleSave} disabled={saving} className="flex items-center gap-1 px-3 py-1.5 bg-accent-primary rounded-[6px] text-[11px] font-semibold text-bg-primary hover:bg-accent-secondary transition-colors disabled:opacity-60">
-                        <Save size={11} /> Save
-                      </button>
-                    </>
-                  ) : (
-                    <button onClick={() => { setEditContent(content); setMode('edit') }} className="flex items-center gap-1 px-3 py-1.5 border border-border rounded-[6px] text-[11px] font-semibold text-text-secondary hover:bg-bg-secondary transition-colors">
-                      <Pencil size={11} /> Edit
+              {/* Doc header bar */}
+              <div className="flex items-center justify-between px-6 py-2.5 border-b border-border flex-shrink-0">
+                <div className="flex items-center gap-3 flex-1 min-w-0">
+                  <input
+                    value={title}
+                    onChange={(e) => setTitle(e.target.value)}
+                    placeholder="Untitled"
+                    className="text-sm font-heading font-bold text-text-primary bg-transparent outline-none border-none flex-1 min-w-0"
+                  />
+                  <StatusBadgeColored status={selected.status} />
+                </div>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  {error && <span className="text-[10px] text-error max-w-[200px] truncate">{error}</span>}
+                  <span className="text-[10px] text-text-tertiary">
+                    rev {selected.revision} · {charCount}c · {wordCount}w
+                  </span>
+
+                  {/* Status actions */}
+                  {selected.status === 'draft' && (
+                    <button
+                      onClick={() => handleStatusChange('finished')}
+                      className="flex items-center gap-1 px-2.5 py-1.5 border border-green-400 rounded-[6px] text-[11px] font-medium text-green-600 hover:bg-green-50 transition-colors"
+                    >
+                      <CheckCircle size={11} /> Mark Finished
                     </button>
                   )}
-                  <button onClick={() => setShowImages(!showImages)} className={cn('flex items-center gap-1 px-2.5 py-1.5 border rounded-[6px] text-[11px] transition-colors', showImages ? 'border-accent-primary text-accent-primary' : 'border-border text-text-secondary hover:bg-bg-secondary')}>
-                    <ImageIcon size={11} /> {images.length}
-                  </button>
-                  <button onClick={() => handleIngest(selected)} className="flex items-center gap-1 px-3 py-1.5 border border-accent-primary rounded-[6px] text-[11px] font-semibold text-accent-primary hover:bg-accent-primary hover:text-bg-primary transition-colors">
-                    <ArrowRight size={11} /> Ingest
+                  {selected.status === 'finished' && (
+                    <>
+                      <button
+                        onClick={() => handleStatusChange('draft')}
+                        className="flex items-center gap-1 px-2.5 py-1.5 border border-border rounded-[6px] text-[11px] text-text-secondary hover:bg-bg-secondary transition-colors"
+                      >
+                        Back to Draft
+                      </button>
+                      <button
+                        onClick={handleIngest}
+                        className="flex items-center gap-1 px-3 py-1.5 bg-green-600 rounded-[6px] text-[11px] font-semibold text-white hover:bg-green-700 transition-colors"
+                      >
+                        <ArrowRight size={11} /> Ingest
+                      </button>
+                    </>
+                  )}
+
+                  <button
+                    onClick={handleSave}
+                    disabled={saving}
+                    className="flex items-center gap-1 px-3 py-1.5 bg-accent-primary rounded-[6px] text-[11px] font-semibold text-bg-primary hover:bg-accent-secondary transition-colors disabled:opacity-60"
+                  >
+                    <Save size={11} /> {saving ? 'Saving...' : 'Save'}
                   </button>
                 </div>
               </div>
-              <div className="flex flex-1 overflow-hidden">
-                <div className="flex-1 overflow-y-auto">
-                  {mode === 'edit' ? (
-                    <textarea value={editContent} onChange={(e) => setEditContent(e.target.value)} className="w-full h-full p-6 bg-bg-primary text-text-primary text-sm font-mono leading-relaxed outline-none resize-none" spellCheck={false} />
-                  ) : (
-                    <article className="px-8 py-6 prose-pagefly">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{previewContent}</ReactMarkdown>
-                    </article>
+
+              {/* Toolbar */}
+              {editor && (
+                <div className="flex items-center gap-0.5 px-4 py-1.5 border-b border-border flex-shrink-0 flex-wrap bg-bg-primary relative z-20">
+                  <TBtn onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()} active={editor.isActive('heading', { level: 1 })} icon={<Heading1 size={14} />} title="Heading 1" />
+                  <TBtn onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()} active={editor.isActive('heading', { level: 2 })} icon={<Heading2 size={14} />} title="Heading 2" />
+                  <TBtn onClick={() => editor.chain().focus().toggleHeading({ level: 3 }).run()} active={editor.isActive('heading', { level: 3 })} icon={<Heading3 size={14} />} title="Heading 3" />
+                  <Sep />
+                  <TBtn onClick={() => editor.chain().focus().toggleBold().run()} active={editor.isActive('bold')} icon={<Bold size={14} />} title="Bold (Ctrl+B)" />
+                  <TBtn onClick={() => editor.chain().focus().toggleItalic().run()} active={editor.isActive('italic')} icon={<Italic size={14} />} title="Italic (Ctrl+I)" />
+                  <TBtn onClick={() => editor.chain().focus().toggleStrike().run()} active={editor.isActive('strike')} icon={<Strikethrough size={14} />} title="Strikethrough" />
+                  <TBtn onClick={() => editor.chain().focus().toggleCode().run()} active={editor.isActive('code')} icon={<Code size={14} />} title="Inline Code" />
+                  <TBtn onClick={() => editor.chain().focus().toggleCodeBlock().run()} active={editor.isActive('codeBlock')} icon={<CodeSquare size={14} />} title="Code Block" />
+                  <Sep />
+                  <TBtn onClick={() => editor.chain().focus().toggleBulletList().run()} active={editor.isActive('bulletList')} icon={<List size={14} />} title="Bullet List" />
+                  <TBtn onClick={() => editor.chain().focus().toggleOrderedList().run()} active={editor.isActive('orderedList')} icon={<ListOrdered size={14} />} title="Ordered List" />
+                  <TBtn onClick={() => editor.chain().focus().toggleBlockquote().run()} active={editor.isActive('blockquote')} icon={<Quote size={14} />} title="Blockquote" />
+                  <TBtn onClick={() => editor.chain().focus().setHorizontalRule().run()} icon={<Minus size={14} />} title="Horizontal Rule" />
+                  <Sep />
+                  <ImageInsertButton editor={editor} />
+                  <TableInsertButton editor={editor} />
+                  {isInTable && (
+                    <>
+                      <Sep />
+                      <TBtn onClick={() => editor.chain().focus().addRowAfter().run()} icon={<><RowsIcon size={12} /><Plus size={8} /></>} title="Add Row" />
+                      <TBtn onClick={() => editor.chain().focus().addColumnAfter().run()} icon={<><ColumnsIcon size={12} /><Plus size={8} /></>} title="Add Column" />
+                      <TBtn onClick={() => editor.chain().focus().deleteRow().run()} icon={<><RowsIcon size={12} /><Minus size={8} /></>} title="Delete Row" />
+                      <TBtn onClick={() => editor.chain().focus().deleteColumn().run()} icon={<><ColumnsIcon size={12} /><Minus size={8} /></>} title="Delete Column" />
+                      <TBtn onClick={() => editor.chain().focus().deleteTable().run()} icon={<Trash2 size={12} />} title="Delete Table" />
+                    </>
                   )}
+                  <Sep />
+                  <TBtn onClick={() => editor.chain().focus().undo().run()} disabled={!editor.can().undo()} icon={<Undo2 size={14} />} title="Undo" />
+                  <TBtn onClick={() => editor.chain().focus().redo().run()} disabled={!editor.can().redo()} icon={<Redo2 size={14} />} title="Redo" />
                 </div>
-                {/* Image panel */}
-                {showImages && (
-                  <aside className="w-[220px] border-l border-border overflow-y-auto p-3 flex flex-col gap-2">
-                    <span className="text-[10px] font-bold uppercase tracking-[1.5px] text-text-tertiary">Images ({images.length})</span>
-                    {images.length === 0 ? (
-                      <p className="text-[10px] text-text-tertiary">No images. Upload one in Edit mode.</p>
-                    ) : images.map((img) => (
-                      <div key={img.name} className="group relative rounded-[6px] overflow-hidden border border-border">
-                        <img src={`/api/workspace/${selected.name}/images/${img.name}?token=${token}`} alt={img.name} className="w-full" />
-                        <div className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <button onClick={() => handleDeleteImage(img.name)} className="p-1 bg-error/90 rounded text-white"><X size={10} /></button>
-                        </div>
-                        <div className="px-2 py-1 text-[9px] text-text-tertiary truncate">{img.name}</div>
-                      </div>
-                    ))}
-                  </aside>
-                )}
+              )}
+
+              {/* Editor */}
+              <div className="flex-1 overflow-y-auto">
+                <div className="max-w-[780px] mx-auto">
+                  <EditorContent editor={editor} />
+                </div>
               </div>
             </>
           ) : (
             <div className="flex flex-col items-center justify-center h-full text-text-tertiary gap-2">
-              <FolderOpen size={40} className="opacity-30" />
+              <PenTool size={40} className="opacity-20" />
               <p className="text-sm">Select a document or create a new one</p>
             </div>
           )}
         </div>
       </div>
+    </div>
+  )
+}
+
+/* ── Small components ── */
+
+function StatusBadge({ status }: { status: string }) {
+  return <span className="uppercase text-[9px] font-bold">{status}</span>
+}
+
+function StatusBadgeColored({ status }: { status: string }) {
+  return (
+    <span className={cn(
+      'text-[10px] px-2 py-0.5 rounded-full font-medium',
+      status === 'draft' ? 'bg-amber-100 text-amber-700' :
+      status === 'finished' ? 'bg-green-100 text-green-700' :
+      'bg-blue-100 text-blue-700'
+    )}>
+      {status}
+    </span>
+  )
+}
+
+function TBtn({ onClick, active, disabled, icon, title }: {
+  onClick: () => void; active?: boolean; disabled?: boolean; icon: React.ReactNode; title: string
+}) {
+  return (
+    <button onClick={onClick} disabled={disabled} title={title} className={cn(
+      'p-1.5 rounded transition-colors flex items-center gap-0.5',
+      active ? 'bg-bg-tertiary text-accent-primary' : 'text-text-secondary hover:bg-bg-secondary hover:text-text-primary',
+      disabled && 'opacity-30 cursor-not-allowed'
+    )}>
+      {icon}
+    </button>
+  )
+}
+
+function Sep() {
+  return <div className="w-px h-5 bg-border mx-1" />
+}
+
+/* ── Image insert ── */
+
+function ImageInsertButton({ editor }: { editor: ReturnType<typeof useEditor> }) {
+  const [open, setOpen] = useState(false)
+  const fileRef = useRef<HTMLInputElement>(null)
+  const popRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const handler = (e: MouseEvent) => {
+      if (popRef.current && !popRef.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open])
+
+  const insertFromUrl = () => {
+    const url = prompt('Image URL:')
+    if (url?.trim()) editor?.chain().focus().setImage({ src: url.trim() }).run()
+    setOpen(false)
+  }
+
+  const insertFromFile = () => { fileRef.current?.click(); setOpen(false) }
+
+  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    try {
+      const form = new FormData()
+      form.append('file', file)
+      const { data } = await api.post('/api/workspace/images', form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+      // Build full URL with token for authenticated access
+      const token = localStorage.getItem('pagefly_token') || ''
+      const src = `${api.defaults.baseURL || ''}${data.url}?token=${token}`
+      editor?.chain().focus().setImage({ src }).run()
+    } catch {
+      alert('Image upload failed')
+    }
+    e.target.value = ''
+  }
+
+  return (
+    <div className="relative" ref={popRef}>
+      <button onClick={() => setOpen(!open)} title="Insert Image" className={cn(
+        'p-1.5 rounded transition-colors text-text-secondary hover:bg-bg-secondary hover:text-text-primary',
+        open && 'bg-bg-tertiary text-accent-primary'
+      )}>
+        <ImageIcon size={14} />
+      </button>
+      {open && (
+        <div className="absolute top-full left-0 mt-1 bg-bg-primary border border-border rounded-lg shadow-lg z-[100] py-1 min-w-[150px]">
+          <button onClick={insertFromUrl} className="flex items-center gap-2 w-full px-3 py-2 text-xs text-text-primary hover:bg-bg-secondary transition-colors">
+            <Link size={12} /> From URL
+          </button>
+          <button onClick={insertFromFile} className="flex items-center gap-2 w-full px-3 py-2 text-xs text-text-primary hover:bg-bg-secondary transition-colors">
+            <Upload size={12} /> Upload File
+          </button>
+        </div>
+      )}
+      <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleFile} />
+    </div>
+  )
+}
+
+/* ── Table grid picker ── */
+
+function TableInsertButton({ editor }: { editor: ReturnType<typeof useEditor> }) {
+  const [open, setOpen] = useState(false)
+  const [hover, setHover] = useState<{ r: number; c: number } | null>(null)
+  const [customRows, setCustomRows] = useState('')
+  const [customCols, setCustomCols] = useState('')
+  const popRef = useRef<HTMLDivElement>(null)
+  const maxR = 8, maxC = 8
+
+  useEffect(() => {
+    if (!open) return
+    const handler = (e: MouseEvent) => {
+      if (popRef.current && !popRef.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open])
+
+  const insert = (rows: number, cols: number) => {
+    if (rows < 1 || cols < 1) return
+    editor?.chain().focus().insertTable({ rows, cols, withHeaderRow: true }).run()
+    setOpen(false)
+    setHover(null)
+    setCustomRows('')
+    setCustomCols('')
+  }
+
+  return (
+    <div className="relative" ref={popRef}>
+      <button onClick={() => setOpen(!open)} title="Insert Table" className={cn(
+        'p-1.5 rounded transition-colors text-text-secondary hover:bg-bg-secondary hover:text-text-primary',
+        open && 'bg-bg-tertiary text-accent-primary'
+      )}>
+        <TableIcon size={14} />
+      </button>
+      {open && (
+        <div className="absolute top-full left-0 mt-1 bg-bg-primary border border-border rounded-lg shadow-lg z-[100] p-2">
+          <div className="grid gap-[2px]" style={{ gridTemplateColumns: `repeat(${maxC}, 1fr)` }}>
+            {Array.from({ length: maxR * maxC }, (_, i) => {
+              const r = Math.floor(i / maxC) + 1
+              const c = (i % maxC) + 1
+              const active = hover && r <= hover.r && c <= hover.c
+              return (
+                <div key={i} onMouseEnter={() => setHover({ r, c })} onClick={() => insert(r, c)}
+                  className={cn('w-[18px] h-[18px] rounded-[2px] border cursor-pointer transition-colors',
+                    active ? 'bg-accent-primary/30 border-accent-primary' : 'bg-bg-secondary border-border hover:border-text-tertiary'
+                  )} />
+              )
+            })}
+          </div>
+          <div className="text-center text-[10px] text-text-tertiary mt-1.5 font-mono">
+            {hover ? `${hover.c} × ${hover.r}` : 'Select size'}
+          </div>
+          <div className="border-t border-border mt-2 pt-2">
+            <div className="flex items-center gap-1.5">
+              <input
+                type="number" min={1} max={50} placeholder="cols" value={customCols}
+                onChange={(e) => setCustomCols(e.target.value)}
+                className="w-[48px] px-1.5 py-1 text-[11px] border border-border rounded bg-bg-secondary text-text-primary outline-none text-center"
+              />
+              <span className="text-[10px] text-text-tertiary">×</span>
+              <input
+                type="number" min={1} max={50} placeholder="rows" value={customRows}
+                onChange={(e) => setCustomRows(e.target.value)}
+                className="w-[48px] px-1.5 py-1 text-[11px] border border-border rounded bg-bg-secondary text-text-primary outline-none text-center"
+              />
+              <button
+                onClick={() => insert(parseInt(customRows) || 3, parseInt(customCols) || 3)}
+                className="px-2 py-1 text-[10px] font-semibold bg-accent-primary text-bg-primary rounded hover:bg-accent-secondary transition-colors"
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

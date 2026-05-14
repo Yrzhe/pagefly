@@ -40,6 +40,13 @@ _ALLOWED_TASK_COLUMNS = frozenset({
     "task_type",
     "updated_at",
 })
+_ALLOWED_WSDOC_COLUMNS = frozenset({
+    "title",
+    "content",
+    "revision",
+    "status",
+    "updated_at",
+})
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS documents (
@@ -180,6 +187,17 @@ CREATE TABLE IF NOT EXISTS activity_events (
 CREATE INDEX IF NOT EXISTS idx_activity_local_uuid ON activity_events(local_uuid);
 CREATE INDEX IF NOT EXISTS idx_activity_started_at ON activity_events(started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_activity_audio_id ON activity_events(audio_id);
+
+CREATE TABLE IF NOT EXISTS workspace_documents (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL DEFAULT '',
+    content TEXT NOT NULL DEFAULT '',
+    revision INTEGER NOT NULL DEFAULT 1,
+    status TEXT NOT NULL DEFAULT 'draft',
+    created_by TEXT NOT NULL DEFAULT 'human',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
 """
 
 
@@ -646,6 +664,112 @@ def delete_session(chat_id: int) -> None:
     conn.execute("DELETE FROM chat_sessions WHERE chat_id = ?", (chat_id,))
     conn.commit()
     conn.close()
+
+
+# ── Workspace Documents ──
+
+def insert_workspace_document(
+    doc_id: str,
+    title: str = "",
+    content: str = "",
+    status: str = "draft",
+    created_by: str = "human",
+) -> None:
+    """Insert a new workspace document."""
+    ts = now_iso()
+    conn = get_connection()
+    try:
+        conn.execute(
+            """INSERT INTO workspace_documents (id, title, content, revision, status, created_by, created_at, updated_at)
+            VALUES (?, ?, ?, 1, ?, ?, ?, ?)""",
+            (doc_id, title, content, status, created_by, ts, ts),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_workspace_document(doc_id: str) -> dict | None:
+    """Get a workspace document by ID."""
+    conn = get_connection()
+    try:
+        row = conn.execute("SELECT * FROM workspace_documents WHERE id = ?", (doc_id,)).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def list_workspace_documents(status: str | None = None, limit: int = 100) -> list[dict]:
+    """List workspace documents, newest first."""
+    conn = get_connection()
+    try:
+        if status:
+            rows = conn.execute(
+                "SELECT id, title, status, revision, created_by, created_at, updated_at "
+                "FROM workspace_documents WHERE status = ? ORDER BY updated_at DESC LIMIT ?",
+                (status, limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT id, title, status, revision, created_by, created_at, updated_at "
+                "FROM workspace_documents ORDER BY updated_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def update_workspace_document(doc_id: str, expected_revision: int | None = None, **fields) -> int:
+    """Update workspace document fields. Returns new revision.
+
+    If expected_revision is given, enforces optimistic locking:
+    raises ValueError if current revision != expected_revision.
+    """
+    if not fields:
+        return 0
+    conn = get_connection()
+    try:
+        if expected_revision is not None:
+            row = conn.execute(
+                "SELECT revision FROM workspace_documents WHERE id = ?", (doc_id,)
+            ).fetchone()
+            if not row:
+                raise ValueError("Document not found")
+            if row["revision"] != expected_revision:
+                raise ValueError(
+                    f"Conflict: expected revision {expected_revision}, got {row['revision']}"
+                )
+
+        # Bump revision if content changed
+        bump_rev = "content" in fields
+        fields["updated_at"] = now_iso()
+        query, values = _build_update_sql("workspace_documents", _ALLOWED_WSDOC_COLUMNS, fields)
+
+        if bump_rev:
+            # Replace simple SET with revision bump
+            query = query.replace("WHERE id = ?", ", revision = revision + 1 WHERE id = ?")
+
+        conn.execute(query, [*values, doc_id])
+        conn.commit()
+
+        new_row = conn.execute(
+            "SELECT revision FROM workspace_documents WHERE id = ?", (doc_id,)
+        ).fetchone()
+        return new_row["revision"] if new_row else 0
+    finally:
+        conn.close()
+
+
+def delete_workspace_document(doc_id: str) -> bool:
+    """Delete a workspace document. Returns True if deleted."""
+    conn = get_connection()
+    try:
+        cur = conn.execute("DELETE FROM workspace_documents WHERE id = ?", (doc_id,))
+        conn.commit()
+        return cur.rowcount > 0
+    finally:
+        conn.close()
 
 
 # ── Roam History ──

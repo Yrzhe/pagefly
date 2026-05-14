@@ -27,7 +27,7 @@ cd frontend
 npm install --silent
 
 echo "==> Building frontend..."
-VITE_API_URL=https://api.pagefly.ink npm run build
+npm run build
 
 echo "==> Deploying to Cloudflare Pages..."
 npx wrangler pages deploy dist --project-name pagefly --branch main --commit-dirty=true

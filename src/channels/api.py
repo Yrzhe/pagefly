@@ -66,7 +66,6 @@ async def health_check():
 
 # ── Help (no auth required) ──
 
-@app.get("/")
 @app.get("/api")
 async def api_help():
     """API reference — no auth required."""
@@ -1137,6 +1136,172 @@ async def delete_workspace_folder(folder_name: str):
     return {"status": "ok"}
 
 
+# ── Workspace Documents (DB-backed, Tiptap editor) ──
+
+import uuid as _uuid
+
+
+@app.get("/api/workspace/documents", dependencies=[Depends(verify_token)])
+async def list_workspace_documents(
+    status: str = Query(default=""),
+    limit: int = Query(default=100, le=500),
+):
+    """List workspace documents."""
+    docs = db.list_workspace_documents(status=status or None, limit=limit)
+    return {"documents": docs}
+
+
+@app.post("/api/workspace/documents", dependencies=[Depends(verify_token)])
+async def create_workspace_document(body: dict):
+    """Create a new workspace document."""
+    title = body.get("title", "").strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="Title required")
+    doc_id = str(_uuid.uuid4())
+    content = body.get("content", "")
+    created_by = body.get("created_by", "human")
+    db.insert_workspace_document(doc_id, title=title, content=content, created_by=created_by)
+    return {"status": "ok", "id": doc_id}
+
+
+@app.get("/api/workspace/documents/{doc_id}", dependencies=[Depends(verify_token)])
+async def get_workspace_document(doc_id: str):
+    """Get a workspace document by ID (full content)."""
+    doc = db.get_workspace_document(doc_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    return doc
+
+
+@app.patch("/api/workspace/documents/{doc_id}", dependencies=[Depends(verify_token)])
+async def update_workspace_document(doc_id: str, body: dict):
+    """Update a workspace document. Supports optimistic locking via 'revision' field."""
+    doc = db.get_workspace_document(doc_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    fields = {}
+    for key in ("title", "content", "status"):
+        if key in body:
+            fields[key] = body[key]
+    if not fields:
+        raise HTTPException(status_code=400, detail="No fields to update")
+
+    expected_rev = body.get("revision")
+    try:
+        new_rev = db.update_workspace_document(doc_id, expected_revision=expected_rev, **fields)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    return {"status": "ok", "revision": new_rev}
+
+
+@app.delete("/api/workspace/documents/{doc_id}", dependencies=[Depends(verify_token)])
+async def delete_workspace_document_api(doc_id: str):
+    """Delete a workspace document."""
+    if not db.delete_workspace_document(doc_id):
+        raise HTTPException(status_code=404, detail="Document not found")
+    return {"status": "ok"}
+
+
+@app.post("/api/workspace/images", dependencies=[Depends(verify_token)])
+async def upload_workspace_image_new(file: UploadFile = File(...)):
+    """Upload an image for workspace documents. Returns a permanent URL."""
+    import uuid as _u
+    images_dir = DATA_DIR / "workspace" / "_images"
+    images_dir.mkdir(parents=True, exist_ok=True)
+    ext = Path(file.filename or "image.png").suffix or ".png"
+    name = f"{_u.uuid4().hex[:12]}{ext}"
+    target = images_dir / name
+    target.write_bytes(await file.read())
+    return {"status": "ok", "url": f"/api/workspace/images/{name}"}
+
+
+@app.get("/api/workspace/images/{image_name}")
+async def serve_workspace_image_new(
+    image_name: str,
+    token: str = Query(default=""),
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+):
+    """Serve a workspace image (supports token query param for img tags)."""
+    auth_token = credentials.credentials if credentials else token
+    if not auth_token:
+        raise HTTPException(status_code=401, detail="Missing token")
+    from src.auth.service import verify_jwt
+    if not (verify_jwt(auth_token) or (API_MASTER_TOKEN and hmac.compare_digest(auth_token, API_MASTER_TOKEN)) or db.validate_api_token(auth_token)):
+        raise HTTPException(status_code=401, detail="Invalid token")
+    target = (DATA_DIR / "workspace" / "_images" / image_name).resolve()
+    if not target.is_relative_to((DATA_DIR / "workspace" / "_images").resolve()) or not target.exists():
+        raise HTTPException(status_code=404, detail="Not found")
+    return FileResponse(str(target))
+
+
+@app.post("/api/workspace/documents/{doc_id}/ingest", dependencies=[Depends(verify_token)])
+async def ingest_workspace_document(doc_id: str):
+    """Ingest a finished workspace document into the knowledge pipeline.
+
+    Converts HTML content to markdown, runs through ingest, then deletes the workspace doc.
+    """
+    doc = db.get_workspace_document(doc_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    if doc["status"] != "finished":
+        raise HTTPException(status_code=400, detail="Document must be 'finished' before ingest")
+
+    import re
+    import tempfile
+
+    # Simple HTML → text/markdown conversion for ingest
+    html = doc["content"] or ""
+    # Strip HTML tags for a basic markdown approximation
+    # The ingest pipeline will re-classify anyway
+    text = html
+    # Convert common HTML to markdown
+    text = re.sub(r"<h1[^>]*>(.*?)</h1>", r"# \1\n", text)
+    text = re.sub(r"<h2[^>]*>(.*?)</h2>", r"## \1\n", text)
+    text = re.sub(r"<h3[^>]*>(.*?)</h3>", r"### \1\n", text)
+    text = re.sub(r"<strong>(.*?)</strong>", r"**\1**", text)
+    text = re.sub(r"<em>(.*?)</em>", r"*\1*", text)
+    text = re.sub(r"<code>(.*?)</code>", r"`\1`", text)
+    text = re.sub(r"<blockquote[^>]*>(.*?)</blockquote>", r"> \1\n", text, flags=re.DOTALL)
+    text = re.sub(r"<li[^>]*>(.*?)</li>", r"- \1\n", text)
+    text = re.sub(r"<br\s*/?>", "\n", text)
+    text = re.sub(r"<p[^>]*>(.*?)</p>", r"\1\n\n", text, flags=re.DOTALL)
+    text = re.sub(r"<[^>]+>", "", text)  # strip remaining tags
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
+
+    # Write to temp file for ingest
+    title = doc["title"] or "Untitled"
+    safe_name = "".join(c for c in title if c.isalnum() or c in " -_").strip() or "document"
+
+    from src.ingest.pipeline import ingest as run_ingest
+    from src.shared.types import IngestInput
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".md", prefix=f"ws_{safe_name}_",
+                                      dir=str(RAW_DIR), delete=False, encoding="utf-8") as f:
+        f.write(f"# {title}\n\n{text}")
+        tmp_path = f.name
+
+    try:
+        loop = asyncio.get_running_loop()
+        ingested_id = await loop.run_in_executor(
+            None, run_ingest,
+            IngestInput(type="file", file_path=tmp_path, original_filename=f"{safe_name}.md"),
+        )
+    except Exception as e:
+        # Clean up temp file on failure
+        Path(tmp_path).unlink(missing_ok=True)
+        raise HTTPException(status_code=500, detail=f"Ingest failed: {e}")
+
+    if not ingested_id:
+        Path(tmp_path).unlink(missing_ok=True)
+        raise HTTPException(status_code=500, detail="Ingest returned no document ID")
+
+    # Delete workspace document after successful ingest
+    db.delete_workspace_document(doc_id)
+
+    return {"status": "ok", "doc_id": ingested_id}
+
+
 # ── Knowledge Graph ──
 
 @app.get("/api/graph", dependencies=[Depends(verify_token)])
@@ -1544,3 +1709,27 @@ def _temp_file_response(file_path: Path, media_type: str) -> FileResponse:
         media_type=media_type,
         background=BackgroundTask(cleanup_temp_file, file_path),
     )
+
+
+# ── Frontend static files (must be LAST — catch-all for SPA routing) ──
+
+_STATIC_DIR = Path(__file__).resolve().parent.parent.parent / "static"
+
+
+@app.get("/{full_path:path}")
+async def serve_frontend(full_path: str):
+    """Serve frontend static files. SPA fallback to index.html."""
+    if not _STATIC_DIR.is_dir():
+        raise HTTPException(status_code=404, detail="Frontend not built")
+
+    # Try exact file first (JS, CSS, images, etc.)
+    file_path = (_STATIC_DIR / full_path).resolve()
+    if file_path.is_relative_to(_STATIC_DIR) and file_path.is_file():
+        return FileResponse(str(file_path))
+
+    # SPA fallback — all other paths serve index.html
+    index = _STATIC_DIR / "index.html"
+    if index.exists():
+        return FileResponse(str(index))
+
+    raise HTTPException(status_code=404, detail="Not found")

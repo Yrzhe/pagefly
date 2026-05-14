@@ -11,6 +11,8 @@ venv/
 
 # Environment
 .env
+.env.*
+!.env.example
 config.json
 
 # Data (Docker Volume, not tracked)
