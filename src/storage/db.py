@@ -195,6 +195,7 @@ CREATE TABLE IF NOT EXISTS workspace_documents (
     revision INTEGER NOT NULL DEFAULT 1,
     status TEXT NOT NULL DEFAULT 'draft',
     created_by TEXT NOT NULL DEFAULT 'human',
+    chat_json TEXT NOT NULL DEFAULT '[]',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -287,6 +288,15 @@ def init_db() -> None:
             logger.info("Migration: removed FK constraint from operations_log")
     except Exception as e:
         logger.warning("operations_log FK migration skipped: %s", e)
+    # Migration: add chat_json column to workspace_documents if missing
+    try:
+        conn.execute("SELECT chat_json FROM workspace_documents LIMIT 1")
+    except sqlite3.OperationalError:
+        try:
+            conn.execute("ALTER TABLE workspace_documents ADD COLUMN chat_json TEXT NOT NULL DEFAULT '[]'")
+            logger.info("Migration: added chat_json column to workspace_documents")
+        except sqlite3.OperationalError:
+            pass
     conn.commit()
     conn.close()
     logger.info("Database initialized at %s", DB_PATH)
@@ -768,6 +778,35 @@ def delete_workspace_document(doc_id: str) -> bool:
         cur = conn.execute("DELETE FROM workspace_documents WHERE id = ?", (doc_id,))
         conn.commit()
         return cur.rowcount > 0
+    finally:
+        conn.close()
+
+
+def get_workspace_chat(doc_id: str) -> list[dict]:
+    """Get chat history for a workspace document."""
+    import json as _json
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT chat_json FROM workspace_documents WHERE id = ?", (doc_id,)
+        ).fetchone()
+        if row and row["chat_json"]:
+            return _json.loads(row["chat_json"])
+        return []
+    finally:
+        conn.close()
+
+
+def save_workspace_chat(doc_id: str, messages: list[dict]) -> None:
+    """Save chat history for a workspace document."""
+    import json as _json
+    conn = get_connection()
+    try:
+        conn.execute(
+            "UPDATE workspace_documents SET chat_json = ? WHERE id = ?",
+            (_json.dumps(messages, ensure_ascii=False), doc_id),
+        )
+        conn.commit()
     finally:
         conn.close()
 

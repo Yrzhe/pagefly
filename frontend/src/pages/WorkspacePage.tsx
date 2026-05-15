@@ -36,6 +36,10 @@ import {
   ArrowRight,
   CheckCircle,
   FileText,
+  MessageSquare,
+  Send,
+  X,
+  Loader2,
 } from 'lucide-react'
 import api from '@/api/client'
 import { cn } from '@/lib/utils'
@@ -61,6 +65,11 @@ export function WorkspacePage() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [chatOpen, setChatOpen] = useState(false)
+  const [chatMessages, setChatMessages] = useState<{ role: string; content: string; ts?: string }[]>([])
+  const [chatInput, setChatInput] = useState('')
+  const [chatLoading, setChatLoading] = useState(false)
+  const chatEndRef = useRef<HTMLDivElement>(null)
 
   const editor = useEditor({
     extensions: [
@@ -100,6 +109,11 @@ export function WorkspacePage() {
       setTitle(data.title)
       setError('')
       editor?.commands.setContent(data.content || '<p></p>')
+      // Load chat history
+      try {
+        const { data: chatData } = await api.get(`/api/workspace/documents/${doc.id}/chat`)
+        setChatMessages(chatData.messages || [])
+      } catch { setChatMessages([]) }
     } catch {
       setError('Failed to load document')
     }
@@ -224,6 +238,28 @@ export function WorkspacePage() {
     return () => window.removeEventListener('keydown', handler)
   }, [handleSave])
 
+  // Chat send
+  const handleChatSend = useCallback(async () => {
+    if (!selected || !chatInput.trim() || chatLoading) return
+    const msg = chatInput.trim()
+    setChatInput('')
+    setChatMessages((prev) => [...prev, { role: 'user', content: msg }])
+    setChatLoading(true)
+    try {
+      const { data } = await api.post(`/api/workspace/documents/${selected.id}/chat`, { message: msg })
+      setChatMessages(data.messages || [])
+    } catch {
+      setChatMessages((prev) => [...prev, { role: 'assistant', content: 'Error: failed to get response.' }])
+    } finally {
+      setChatLoading(false)
+    }
+  }, [selected, chatInput, chatLoading])
+
+  // Scroll chat to bottom
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [chatMessages, chatLoading])
+
   const charCount = editor?.storage.characterCount?.characters() ?? 0
   const wordCount = editor?.storage.characterCount?.words() ?? 0
   const isInTable = editor?.isActive('table') ?? false
@@ -343,6 +379,15 @@ export function WorkspacePage() {
                   >
                     <Save size={11} /> {saving ? 'Saving...' : 'Save'}
                   </button>
+                  <button
+                    onClick={() => setChatOpen(!chatOpen)}
+                    className={cn(
+                      'flex items-center gap-1 px-3 py-1.5 rounded-[6px] text-[11px] font-medium transition-colors',
+                      chatOpen ? 'bg-accent-primary text-bg-primary' : 'border border-border text-text-secondary hover:bg-bg-secondary'
+                    )}
+                  >
+                    <MessageSquare size={11} /> AI
+                  </button>
                 </div>
               </div>
 
@@ -382,11 +427,88 @@ export function WorkspacePage() {
                 </div>
               )}
 
-              {/* Editor */}
-              <div className="flex-1 overflow-y-auto">
-                <div className="max-w-[780px] mx-auto">
-                  <EditorContent editor={editor} />
+              {/* Editor + Chat Panel */}
+              <div className="flex flex-1 overflow-hidden">
+                <div className="flex-1 overflow-y-auto">
+                  <div className="max-w-[780px] mx-auto">
+                    <EditorContent editor={editor} />
+                  </div>
                 </div>
+
+                {/* AI Chat Panel */}
+                {chatOpen && (
+                  <aside className="w-[320px] border-l border-border flex flex-col flex-shrink-0 bg-bg-primary">
+                    <div className="flex items-center justify-between px-3 py-2 border-b border-border">
+                      <div className="flex items-center gap-2">
+                        <MessageSquare size={13} className="text-accent-primary" />
+                        <span className="text-xs font-bold text-text-primary">AI Assistant</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => { if (selected && confirm('Clear chat history?')) { api.delete(`/api/workspace/documents/${selected.id}/chat`); setChatMessages([]) } }}
+                          className="p-1 rounded text-text-tertiary hover:text-error hover:bg-error/10 transition-colors"
+                          title="Clear chat"
+                        >
+                          <Trash2 size={11} />
+                        </button>
+                        <button onClick={() => setChatOpen(false)} className="p-1 rounded text-text-tertiary hover:text-text-primary hover:bg-bg-secondary transition-colors">
+                          <X size={13} />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Messages */}
+                    <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-2">
+                      {chatMessages.length === 0 && !chatLoading && (
+                        <div className="text-center py-8">
+                          <MessageSquare size={24} className="text-text-tertiary mx-auto mb-2 opacity-30" />
+                          <p className="text-xs text-text-tertiary">Ask AI about this document</p>
+                          <p className="text-[10px] text-text-tertiary mt-1">e.g. "Improve the introduction" or "What's missing?"</p>
+                        </div>
+                      )}
+                      {chatMessages.map((m, i) => (
+                        <div key={i} className={cn('max-w-[95%] text-xs leading-relaxed', m.role === 'user' ? 'ml-auto' : 'mr-auto')}>
+                          <div className={cn(
+                            'px-3 py-2 rounded-lg whitespace-pre-wrap',
+                            m.role === 'user'
+                              ? 'bg-accent-primary/10 text-text-primary rounded-br-sm'
+                              : 'bg-bg-secondary text-text-primary rounded-bl-sm'
+                          )}>
+                            {m.content}
+                          </div>
+                        </div>
+                      ))}
+                      {chatLoading && (
+                        <div className="flex items-center gap-2 text-xs text-text-tertiary mr-auto">
+                          <Loader2 size={12} className="animate-spin" />
+                          Thinking...
+                        </div>
+                      )}
+                      <div ref={chatEndRef} />
+                    </div>
+
+                    {/* Input */}
+                    <div className="p-3 border-t border-border">
+                      <div className="flex gap-2">
+                        <input
+                          value={chatInput}
+                          onChange={(e) => setChatInput(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleChatSend() } }}
+                          placeholder="Ask about this document..."
+                          className="flex-1 px-3 py-2 text-xs bg-bg-secondary border border-border rounded-lg text-text-primary outline-none focus:border-accent-primary transition-colors"
+                          disabled={chatLoading}
+                        />
+                        <button
+                          onClick={handleChatSend}
+                          disabled={chatLoading || !chatInput.trim()}
+                          className="p-2 bg-accent-primary rounded-lg text-bg-primary hover:bg-accent-secondary transition-colors disabled:opacity-40"
+                        >
+                          <Send size={13} />
+                        </button>
+                      </div>
+                    </div>
+                  </aside>
+                )}
               </div>
             </>
           ) : (

@@ -1235,6 +1235,78 @@ async def serve_workspace_image_new(
     return FileResponse(str(target))
 
 
+@app.post("/api/workspace/documents/{doc_id}/chat", dependencies=[Depends(verify_token)])
+async def workspace_chat(doc_id: str, body: dict):
+    """Chat with AI about a workspace document."""
+    doc = db.get_workspace_document(doc_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    user_message = body.get("message", "").strip()
+    if not user_message:
+        raise HTTPException(status_code=400, detail="Message required")
+
+    from src.agents.query import ask, QuerySession
+
+    # Load existing chat history
+    chat_history = db.get_workspace_chat(doc_id)
+    session = QuerySession(messages=list(chat_history))
+
+    # Strip HTML tags for a clean text context
+    import re as _re
+    doc_text = _re.sub(r"<[^>]+>", "", doc.get("content", "")).strip()
+    if len(doc_text) > 8000:
+        doc_text = doc_text[:8000] + "\n\n[...document truncated, showing first 8000 characters...]"
+    doc_title = doc.get("title", "Untitled")
+
+    # Inject document context into the user message
+    context_prompt = (
+        f"[System: You are helping the user edit a document titled \"{doc_title}\". "
+        f"Here is the current document content:\n\n{doc_text[:8000]}\n\n"
+        f"Answer the user's question about this document. If they ask for writing help, "
+        f"provide the improved text directly. Be concise and helpful.]\n\n"
+        f"{user_message}"
+    )
+
+    try:
+        response = await ask(context_prompt, session)
+    except Exception as e:
+        logger.error("Workspace chat failed: %s", e)
+        raise HTTPException(status_code=500, detail="Chat failed")
+
+    # Store clean user message (without context injection)
+    if len(session.messages) >= 2 and session.messages[-2]["role"] == "user":
+        session.messages[-2]["content"] = user_message
+
+    # Cap chat history to prevent unbounded growth
+    MAX_CHAT_MESSAGES = 50
+    if len(session.messages) > MAX_CHAT_MESSAGES:
+        session.messages = session.messages[-MAX_CHAT_MESSAGES:]
+
+    db.save_workspace_chat(doc_id, session.messages)
+
+    return {"response": response, "messages": session.messages}
+
+
+@app.get("/api/workspace/documents/{doc_id}/chat", dependencies=[Depends(verify_token)])
+async def get_workspace_chat_api(doc_id: str):
+    """Get chat history for a workspace document."""
+    doc = db.get_workspace_document(doc_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    return {"messages": db.get_workspace_chat(doc_id)}
+
+
+@app.delete("/api/workspace/documents/{doc_id}/chat", dependencies=[Depends(verify_token)])
+async def clear_workspace_chat(doc_id: str):
+    """Clear chat history for a workspace document."""
+    doc = db.get_workspace_document(doc_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    db.save_workspace_chat(doc_id, [])
+    return {"status": "ok"}
+
+
 @app.post("/api/workspace/documents/{doc_id}/ingest", dependencies=[Depends(verify_token)])
 async def ingest_workspace_document(doc_id: str):
     """Ingest a finished workspace document into the knowledge pipeline.
