@@ -258,10 +258,10 @@ export function WorkspacePage() {
     }
   }, [selected, chatInput, chatLoading])
 
-  // Scroll chat to bottom
+  // Scroll chat to bottom on new messages, loading state change, or panel open
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [chatMessages, chatLoading])
+    setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50)
+  }, [chatMessages, chatLoading, chatOpen])
 
   const charCount = editor?.storage.characterCount?.characters() ?? 0
   const wordCount = editor?.storage.characterCount?.words() ?? 0
