@@ -1258,15 +1258,47 @@ async def workspace_chat(doc_id: str, body: dict):
     if len(doc_text) > 8000:
         doc_text = doc_text[:8000] + "\n\n[...document truncated, showing first 8000 characters...]"
     doc_title = doc.get("title", "Untitled")
+    doc_status = doc.get("status", "draft")
+    doc_revision = doc.get("revision", 1)
 
-    # Inject document context into the user message
-    context_prompt = (
-        f"[System: You are helping the user edit a document titled \"{doc_title}\". "
-        f"Here is the current document content:\n\n{doc_text[:8000]}\n\n"
-        f"Answer the user's question about this document. If they ask for writing help, "
-        f"provide the improved text directly. Be concise and helpful.]\n\n"
-        f"{user_message}"
-    )
+    # Load recent Telegram/Web chat for broader project context
+    from src.shared.config import TELEGRAM_CHAT_ID
+    recent_context = ""
+    try:
+        tg_chat_id = int(TELEGRAM_CHAT_ID) if TELEGRAM_CHAT_ID else 0
+        if tg_chat_id:
+            tg_messages = db.load_session(tg_chat_id) or []
+        else:
+            tg_messages = db.load_session(99999) or []  # web chat fallback
+        if tg_messages:
+            # Take last 10 messages as background context
+            recent = tg_messages[-10:]
+            parts = [f"{m['role']}: {m['content'][:300]}" for m in recent]
+            recent_context = "\n".join(parts)
+    except Exception:
+        pass
+
+    # Inject document context + project context
+    context_parts = [
+        f"[System: You are an AI writing assistant for the user's workspace document.",
+        f"Document title: \"{doc_title}\" | Status: {doc_status} | Revision: {doc_revision}",
+        f"",
+        f"Current document content:",
+        f"{doc_text}",
+    ]
+    if recent_context:
+        context_parts.extend([
+            f"",
+            f"Recent conversation context (from user's other chat sessions, for background awareness):",
+            f"{recent_context}",
+        ])
+    context_parts.extend([
+        f"",
+        f"Help the user with this document. If they ask for writing help, provide the improved text directly. Be concise and helpful.]",
+        f"",
+        f"{user_message}",
+    ])
+    context_prompt = "\n".join(context_parts)
 
     try:
         response = await ask(context_prompt, session)
