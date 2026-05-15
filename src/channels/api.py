@@ -1255,50 +1255,47 @@ async def workspace_chat(doc_id: str, body: dict):
     # Strip HTML tags for a clean text context
     import re as _re
     doc_text = _re.sub(r"<[^>]+>", "", doc.get("content", "")).strip()
-    if len(doc_text) > 8000:
-        doc_text = doc_text[:8000] + "\n\n[...document truncated, showing first 8000 characters...]"
     doc_title = doc.get("title", "Untitled")
     doc_status = doc.get("status", "draft")
     doc_revision = doc.get("revision", 1)
 
-    # Load recent Telegram/Web chat for broader project context
-    from src.shared.config import TELEGRAM_CHAT_ID
-    recent_context = ""
-    try:
-        tg_chat_id = int(TELEGRAM_CHAT_ID) if TELEGRAM_CHAT_ID else 0
-        if tg_chat_id:
-            tg_messages = db.load_session(tg_chat_id) or []
-        else:
-            tg_messages = db.load_session(99999) or []  # web chat fallback
-        if tg_messages:
-            # Take last 10 messages as background context
-            recent = tg_messages[-10:]
-            parts = [f"{m['role']}: {m['content'][:300]}" for m in recent]
-            recent_context = "\n".join(parts)
-    except Exception:
-        pass
+    # Check if we need to (re)inject document content:
+    # - First message in conversation → inject
+    # - Document revised since last injection → inject
+    # - Otherwise → skip (agent already has it from history)
+    last_injected_rev = None
+    for m in reversed(chat_history):
+        if m.get("_doc_rev"):
+            last_injected_rev = m["_doc_rev"]
+            break
 
-    # Inject document context + project context
-    context_parts = [
-        f"[System: You are an AI writing assistant for the user's workspace document.",
-        f"Document title: \"{doc_title}\" | Status: {doc_status} | Revision: {doc_revision}",
-        f"",
-        f"Current document content:",
-        f"{doc_text}",
-    ]
-    if recent_context:
-        context_parts.extend([
-            f"",
-            f"Recent conversation context (from user's other chat sessions, for background awareness):",
-            f"{recent_context}",
-        ])
-    context_parts.extend([
-        f"",
-        f"Help the user with this document. If they ask for writing help, provide the improved text directly. Be concise and helpful.]",
-        f"",
-        f"{user_message}",
-    ])
-    context_prompt = "\n".join(context_parts)
+    need_doc_inject = not chat_history or last_injected_rev != doc_revision
+
+    context_parts = []
+    if need_doc_inject:
+        if len(doc_text) > 8000:
+            doc_text = doc_text[:8000] + "\n\n[...document truncated, showing first 8000 characters...]"
+        context_parts.append(
+            f"[System: Document \"{doc_title}\" (status: {doc_status}, rev {doc_revision}):\n\n{doc_text}\n]"
+        )
+
+        # Load recent Telegram/Web chat for broader project context (only on first inject)
+        if not chat_history:
+            from src.shared.config import TELEGRAM_CHAT_ID
+            try:
+                tg_chat_id = int(TELEGRAM_CHAT_ID) if TELEGRAM_CHAT_ID else 0
+                tg_messages = db.load_session(tg_chat_id or 99999) or []
+                if tg_messages:
+                    recent = tg_messages[-10:]
+                    parts = [f"{m['role']}: {m['content'][:300]}" for m in recent]
+                    context_parts.append(
+                        f"[Background context from recent conversations:\n{chr(10).join(parts)}\n]"
+                    )
+            except Exception:
+                pass
+
+    context_parts.append(user_message)
+    context_prompt = "\n\n".join(context_parts)
 
     try:
         response = await ask(context_prompt, session)
@@ -1306,9 +1303,11 @@ async def workspace_chat(doc_id: str, body: dict):
         logger.error("Workspace chat failed: %s", e)
         raise HTTPException(status_code=500, detail="Chat failed")
 
-    # Store clean user message (without context injection)
+    # Store clean user message (without context injection) + track doc revision
     if len(session.messages) >= 2 and session.messages[-2]["role"] == "user":
         session.messages[-2]["content"] = user_message
+        if need_doc_inject:
+            session.messages[-2]["_doc_rev"] = doc_revision
 
     # Cap chat history to prevent unbounded growth
     MAX_CHAT_MESSAGES = 50
