@@ -1252,6 +1252,50 @@ async def promote_draft_to_wiki(args):
     return result
 
 
+@tool(
+    "read_workspace_document",
+    (
+        "Read a workspace document by its ID. Returns the document's title, content (HTML), "
+        "status (draft/finished), revision number, and timestamps. "
+        "Use this when the user mentions they are editing a workspace document "
+        "or when you see a workspace document ID in the conversation."
+    ),
+    {"doc_id": str},
+)
+async def read_workspace_document(args):
+    """Read a workspace document from the database."""
+    from src.storage import db as _db
+    doc = _db.get_workspace_document(args["doc_id"])
+    if not doc:
+        return {"content": [{"type": "text", "text": f"Error: workspace document not found: {args['doc_id']}"}]}
+
+    import re as _re
+    # Strip HTML for readable text
+    text = _re.sub(r"<[^>]+>", "", doc.get("content", "")).strip()
+    result = {
+        "id": doc["id"],
+        "title": doc["title"],
+        "status": doc["status"],
+        "revision": doc["revision"],
+        "content": text,
+        "created_at": doc["created_at"],
+        "updated_at": doc["updated_at"],
+    }
+    return {"content": [{"type": "text", "text": json.dumps(result, ensure_ascii=False)}]}
+
+
+@tool(
+    "list_workspace_documents",
+    "List all workspace documents (rich-text editor documents, not file-based). Shows id, title, status, revision.",
+    {},
+)
+async def list_workspace_documents_tool(args):
+    """List workspace documents from the database."""
+    from src.storage import db as _db
+    docs = _db.list_workspace_documents()
+    return {"content": [{"type": "text", "text": json.dumps(docs, ensure_ascii=False, indent=2)}]}
+
+
 def build_knowledge_tools_server():
     """Create MCP server with all knowledge/wiki tools."""
     return create_sdk_mcp_server(
@@ -1286,6 +1330,8 @@ def build_knowledge_tools_server():
             move_workspace_to_raw,
             promote_draft_to_wiki,
             query_database,
+            read_workspace_document,
+            list_workspace_documents_tool,
         ],
     )
 
@@ -1352,6 +1398,8 @@ def build_agent_options(
             "mcp__pagefly__move_workspace_to_raw",
             "mcp__pagefly__promote_draft_to_wiki",
             "mcp__pagefly__query_database",
+            "mcp__pagefly__read_workspace_document",
+            "mcp__pagefly__list_workspace_documents",
         ],
         permission_mode="bypassPermissions",
         max_turns=max_turns,

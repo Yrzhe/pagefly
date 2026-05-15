@@ -109,9 +109,9 @@ export function WorkspacePage() {
       setTitle(data.title)
       setError('')
       editor?.commands.setContent(data.content || '<p></p>')
-      // Load chat history
+      // Load chat history from main shared session
       try {
-        const { data: chatData } = await api.get(`/api/workspace/documents/${doc.id}/chat`)
+        const { data: chatData } = await api.get('/api/chat/history')
         setChatMessages(chatData.messages || [])
       } catch { setChatMessages([]) }
     } catch {
@@ -243,10 +243,13 @@ export function WorkspacePage() {
     if (!selected || !chatInput.trim() || chatLoading) return
     const msg = chatInput.trim()
     setChatInput('')
+    // Show user message immediately (without prefix)
     setChatMessages((prev) => [...prev, { role: 'user', content: msg }])
     setChatLoading(true)
     try {
-      const { data } = await api.post(`/api/workspace/documents/${selected.id}/chat`, { message: msg })
+      // Prefix message with workspace document context so agent knows what we're editing
+      const prefixedMsg = `[正在编辑 Workspace 文档: ${selected.id} "${selected.title}"]\n${msg}`
+      const { data } = await api.post('/api/chat', { message: prefixedMsg })
       setChatMessages(data.messages || [])
     } catch {
       setChatMessages((prev) => [...prev, { role: 'assistant', content: 'Error: failed to get response.' }])
@@ -445,7 +448,7 @@ export function WorkspacePage() {
                       </div>
                       <div className="flex items-center gap-1">
                         <button
-                          onClick={() => { if (selected && confirm('Clear chat history?')) { api.delete(`/api/workspace/documents/${selected.id}/chat`); setChatMessages([]) } }}
+                          onClick={() => { if (confirm('Clear all chat history?')) { api.post('/api/chat/reset'); setChatMessages([]) } }}
                           className="p-1 rounded text-text-tertiary hover:text-error hover:bg-error/10 transition-colors"
                           title="Clear chat"
                         >
