@@ -440,7 +440,7 @@ export function WorkspacePage() {
 
                 {/* AI Chat Panel */}
                 {chatOpen && (
-                  <aside className="w-[320px] border-l border-border flex flex-col flex-shrink-0 bg-bg-primary">
+                  <aside className="w-[320px] border-l border-border flex flex-col flex-shrink-0 bg-bg-primary overflow-hidden">
                     <div className="flex items-center justify-between px-3 py-2 border-b border-border">
                       <div className="flex items-center gap-2">
                         <MessageSquare size={13} className="text-accent-primary" />
@@ -470,9 +470,9 @@ export function WorkspacePage() {
                         </div>
                       )}
                       {chatMessages.map((m, i) => (
-                        <div key={i} className={cn('max-w-[95%] text-xs leading-relaxed', m.role === 'user' ? 'ml-auto' : 'mr-auto')}>
+                        <div key={i} className={cn('max-w-[95%] text-xs leading-relaxed min-w-0', m.role === 'user' ? 'ml-auto' : 'mr-auto')}>
                           <div className={cn(
-                            'px-3 py-2 rounded-lg whitespace-pre-wrap',
+                            'px-3 py-2 rounded-lg whitespace-pre-wrap break-words overflow-hidden',
                             m.role === 'user'
                               ? 'bg-accent-primary/10 text-text-primary rounded-br-sm'
                               : 'bg-bg-secondary text-text-primary rounded-bl-sm'
