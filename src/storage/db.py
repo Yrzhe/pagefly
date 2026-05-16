@@ -201,6 +201,29 @@ CREATE TABLE IF NOT EXISTS workspace_documents (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS workspace_suggestions (
+    id TEXT PRIMARY KEY,
+    document_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    quote TEXT NOT NULL,
+    prefix TEXT,
+    suffix TEXT,
+    range_start INTEGER NOT NULL,
+    range_end INTEGER NOT NULL,
+    new_content TEXT,
+    content_hash TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    created_by TEXT NOT NULL,
+    resolved_by TEXT,
+    resolved_at TEXT,
+    rejection_reason TEXT,
+    created_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ws_suggestions_one_pending_per_doc
+    ON workspace_suggestions(document_id) WHERE status = 'pending';
+CREATE INDEX IF NOT EXISTS ws_suggestions_status_idx
+    ON workspace_suggestions(document_id, status);
 """
 
 
@@ -808,6 +831,97 @@ def delete_workspace_document(doc_id: str) -> bool:
         cur = conn.execute("DELETE FROM workspace_documents WHERE id = ?", (doc_id,))
         conn.commit()
         return cur.rowcount > 0
+    finally:
+        conn.close()
+
+
+_RESOLVE_ACTIONS = {"accept": "accepted", "reject": "rejected", "cancel": "cancelled"}
+
+
+def create_workspace_suggestion(
+    *,
+    document_id: str,
+    kind: str,
+    quote: str,
+    range_start: int,
+    range_end: int,
+    content_hash: str,
+    created_by: str,
+    prefix: str | None = None,
+    suffix: str | None = None,
+    new_content: str | None = None,
+) -> str:
+    """Create a pending suggestion. Raises ValueError('PENDING_SUGGESTION_EXISTS')
+    if the document already has one (enforced by a partial unique index)."""
+    import uuid as _uuid
+
+    sid = str(_uuid.uuid4())
+    ts = now_iso()
+    conn = get_connection()
+    try:
+        conn.execute(
+            """INSERT INTO workspace_suggestions
+               (id, document_id, kind, quote, prefix, suffix, range_start, range_end,
+                new_content, content_hash, status, created_by, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)""",
+            (sid, document_id, kind, quote, prefix, suffix, range_start, range_end,
+             new_content, content_hash, created_by, ts),
+        )
+        conn.commit()
+        return sid
+    except sqlite3.IntegrityError as e:
+        raise ValueError("PENDING_SUGGESTION_EXISTS") from e
+    finally:
+        conn.close()
+
+
+def get_pending_suggestion(document_id: str) -> dict | None:
+    """The single pending suggestion for a document, or None."""
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT * FROM workspace_suggestions WHERE document_id = ? AND status = 'pending'",
+            (document_id,),
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def get_workspace_suggestion(suggestion_id: str) -> dict | None:
+    """Fetch any suggestion by id regardless of status."""
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT * FROM workspace_suggestions WHERE id = ?", (suggestion_id,)
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def resolve_workspace_suggestion(
+    suggestion_id: str,
+    *,
+    action: str,
+    resolved_by: str,
+    rejection_reason: str | None = None,
+) -> None:
+    """Resolve a suggestion. action ∈ {accept, reject, cancel}."""
+    new_status = _RESOLVE_ACTIONS.get(action)
+    if new_status is None:
+        raise ValueError(f"invalid resolve action: {action!r}")
+    conn = get_connection()
+    try:
+        cur = conn.execute(
+            """UPDATE workspace_suggestions
+               SET status = ?, resolved_by = ?, resolved_at = ?, rejection_reason = ?
+               WHERE id = ?""",
+            (new_status, resolved_by, now_iso(), rejection_reason, suggestion_id),
+        )
+        conn.commit()
+        if cur.rowcount == 0:
+            raise ValueError("suggestion not found")
     finally:
         conn.close()
 
