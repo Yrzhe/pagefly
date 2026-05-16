@@ -27,12 +27,19 @@ def create_pending(
     prefix: str | None = None,
     suffix: str | None = None,
     kind: str = "replace",
+    idempotency_key: str | None = None,
 ) -> dict:
     """Resolve the quote against canonical markdown and store a pending row.
 
     Raises AnchorNotFound if the quote does not resolve uniquely,
     ValueError('PENDING_SUGGESTION_EXISTS') if the doc already has one.
+    If idempotency_key replays a prior create, the original row is returned.
     """
+    if idempotency_key:
+        prior = db.get_suggestion_by_idempotency_key(idempotency_key)
+        if prior:
+            return prior
+
     doc = db.get_workspace_document(document_id)
     if not doc:
         raise ValueError("document not found")
@@ -40,18 +47,27 @@ def create_pending(
     res = resolve_anchor(
         {"quote": quote, "prefix": prefix, "suffix": suffix}, doc["content_md"]
     )
-    sid = db.create_workspace_suggestion(
-        document_id=document_id,
-        kind=kind,
-        quote=quote,
-        prefix=prefix,
-        suffix=suffix,
-        range_start=res.absolute_start,
-        range_end=res.absolute_end,
-        new_content=new_content,
-        content_hash=res.content_hash,
-        created_by=created_by,
-    )
+    try:
+        sid = db.create_workspace_suggestion(
+            document_id=document_id,
+            kind=kind,
+            quote=quote,
+            prefix=prefix,
+            suffix=suffix,
+            range_start=res.absolute_start,
+            range_end=res.absolute_end,
+            new_content=new_content,
+            content_hash=res.content_hash,
+            created_by=created_by,
+            idempotency_key=idempotency_key,
+        )
+    except ValueError as e:
+        # Concurrent replay of the same Idempotency-Key — return the winner.
+        if str(e) == "IDEMPOTENCY_REPLAY" and idempotency_key:
+            prior = db.get_suggestion_by_idempotency_key(idempotency_key)
+            if prior:
+                return prior
+        raise
     return db.get_workspace_suggestion(sid)
 
 

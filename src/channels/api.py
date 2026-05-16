@@ -6,7 +6,7 @@ import json
 import tempfile
 from pathlib import Path
 
-from fastapi import FastAPI, File, HTTPException, Query, UploadFile, Depends
+from fastapi import FastAPI, File, Header, HTTPException, Query, UploadFile, Depends
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
@@ -1201,6 +1201,96 @@ async def delete_workspace_document_api(doc_id: str):
     if not db.delete_workspace_document(doc_id):
         raise HTTPException(status_code=404, detail="Document not found")
     return {"status": "ok"}
+
+
+# ── Workspace AI suggestions (character-level, one pending per doc) ──
+
+
+@app.post(
+    "/api/workspace/documents/{doc_id}/suggestions",
+    status_code=201,
+    dependencies=[Depends(verify_token)],
+)
+async def create_workspace_suggestion_api(
+    doc_id: str,
+    body: dict,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+):
+    """Create the single pending suggestion for a document.
+
+    Body: { quote, new_content, created_by, prefix?, suffix?, kind? }.
+    Re-sending with the same Idempotency-Key returns the original suggestion.
+    """
+    from src.workspace import suggestions as _svc
+    from src.workspace.anchor import AnchorNotFound
+
+    quote = (body.get("quote") or "").strip()
+    if not quote:
+        raise HTTPException(status_code=400, detail="quote required")
+    if not db.get_workspace_document(doc_id):
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    try:
+        return _svc.create_pending(
+            document_id=doc_id,
+            quote=quote,
+            new_content=body.get("new_content"),
+            created_by=body.get("created_by") or "agent",
+            prefix=body.get("prefix"),
+            suffix=body.get("suffix"),
+            kind=body.get("kind", "replace"),
+            idempotency_key=idempotency_key,
+        )
+    except AnchorNotFound as e:
+        raise HTTPException(
+            status_code=422,
+            detail={"reason": e.reason, "candidates": e.candidates},
+        )
+    except ValueError as e:
+        if str(e) == "PENDING_SUGGESTION_EXISTS":
+            raise HTTPException(status_code=409, detail="PENDING_SUGGESTION_EXISTS")
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get(
+    "/api/workspace/documents/{doc_id}/suggestions",
+    dependencies=[Depends(verify_token)],
+)
+async def get_workspace_suggestion_api(doc_id: str):
+    """Return the document's single pending suggestion, or null."""
+    if not db.get_workspace_document(doc_id):
+        raise HTTPException(status_code=404, detail="Document not found")
+    return {"pending": db.get_pending_suggestion(doc_id)}
+
+
+@app.post(
+    "/api/workspace/documents/{doc_id}/suggestions/{sid}/resolve",
+    dependencies=[Depends(verify_token)],
+)
+async def resolve_workspace_suggestion_api(doc_id: str, sid: str, body: dict):
+    """Accept (apply + bump revision) or reject (leave untouched) a suggestion."""
+    from src.workspace import suggestions as _svc
+
+    action = body.get("action")
+    if action not in ("accept", "reject", "cancel"):
+        raise HTTPException(status_code=400, detail="action must be accept|reject|cancel")
+
+    sug = db.get_workspace_suggestion(sid)
+    if not sug or sug["document_id"] != doc_id:
+        raise HTTPException(status_code=404, detail="Suggestion not found")
+
+    try:
+        _svc.resolve(
+            sid,
+            action=action,
+            resolved_by=body.get("resolved_by") or "human",
+            rejection_reason=body.get("rejection_reason"),
+        )
+    except _svc.SuggestionDrifted as e:
+        raise HTTPException(status_code=409, detail=f"drift: {e}")
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    return {"status": "ok", "action": action}
 
 
 @app.post("/api/workspace/images", dependencies=[Depends(verify_token)])

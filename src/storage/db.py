@@ -218,12 +218,16 @@ CREATE TABLE IF NOT EXISTS workspace_suggestions (
     resolved_by TEXT,
     resolved_at TEXT,
     rejection_reason TEXT,
+    idempotency_key TEXT,
     created_at TEXT NOT NULL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS ws_suggestions_one_pending_per_doc
     ON workspace_suggestions(document_id) WHERE status = 'pending';
 CREATE INDEX IF NOT EXISTS ws_suggestions_status_idx
     ON workspace_suggestions(document_id, status);
+-- ws_suggestions_idempotency_key index is created in the migration block, not
+-- here: a stale workspace_suggestions table without idempotency_key would make
+-- executescript abort on this index and skip every table defined after it.
 """
 
 
@@ -344,6 +348,25 @@ def init_db() -> None:
             )
         except sqlite3.OperationalError:
             pass
+
+    # Migration: ensure idempotency_key column exists on stale suggestion tables
+    try:
+        conn.execute("SELECT idempotency_key FROM workspace_suggestions LIMIT 1")
+    except sqlite3.OperationalError:
+        try:
+            conn.execute("ALTER TABLE workspace_suggestions ADD COLUMN idempotency_key TEXT")
+            logger.info("Migration: added idempotency_key to workspace_suggestions")
+        except sqlite3.OperationalError:
+            pass
+    # Idempotency unique index — created here (not in SCHEMA) and unconditionally
+    # so both fresh and migrated DBs get it; IF NOT EXISTS makes it idempotent.
+    try:
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ws_suggestions_idempotency_key "
+            "ON workspace_suggestions(idempotency_key) WHERE idempotency_key IS NOT NULL"
+        )
+    except sqlite3.OperationalError:
+        pass
     conn.commit()
     conn.close()
     logger.info("Database initialized at %s", DB_PATH)
@@ -850,6 +873,7 @@ def create_workspace_suggestion(
     prefix: str | None = None,
     suffix: str | None = None,
     new_content: str | None = None,
+    idempotency_key: str | None = None,
 ) -> str:
     """Create a pending suggestion. Raises ValueError('PENDING_SUGGESTION_EXISTS')
     if the document already has one (enforced by a partial unique index)."""
@@ -862,15 +886,30 @@ def create_workspace_suggestion(
         conn.execute(
             """INSERT INTO workspace_suggestions
                (id, document_id, kind, quote, prefix, suffix, range_start, range_end,
-                new_content, content_hash, status, created_by, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)""",
+                new_content, content_hash, status, created_by, idempotency_key, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)""",
             (sid, document_id, kind, quote, prefix, suffix, range_start, range_end,
-             new_content, content_hash, created_by, ts),
+             new_content, content_hash, created_by, idempotency_key, ts),
         )
         conn.commit()
         return sid
     except sqlite3.IntegrityError as e:
+        if idempotency_key and "idempotency" in str(e).lower():
+            raise ValueError("IDEMPOTENCY_REPLAY") from e
         raise ValueError("PENDING_SUGGESTION_EXISTS") from e
+    finally:
+        conn.close()
+
+
+def get_suggestion_by_idempotency_key(idempotency_key: str) -> dict | None:
+    """Look up a suggestion previously created with this Idempotency-Key."""
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT * FROM workspace_suggestions WHERE idempotency_key = ?",
+            (idempotency_key,),
+        ).fetchone()
+        return dict(row) if row else None
     finally:
         conn.close()
 
