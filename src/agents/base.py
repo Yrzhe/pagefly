@@ -1296,6 +1296,59 @@ async def list_workspace_documents_tool(args):
     return {"content": [{"type": "text", "text": json.dumps(docs, ensure_ascii=False, indent=2)}]}
 
 
+@tool(
+    "propose_workspace_suggestion",
+    (
+        "PROPOSE a precise edit to a workspace document — do NOT claim you edited "
+        "it. You cannot change the document directly; this only stages one pending "
+        "suggestion that the human reviews and accepts or rejects. Only one pending "
+        "suggestion may exist per document at a time. Provide: doc_id; quote (the "
+        "EXACT existing text to replace, copied verbatim from the document — read it "
+        "first with read_workspace_document); replacement (the new text); reason "
+        "(one short sentence the human will see). If the quote is ambiguous or not "
+        "found you get an error with candidates — refine the quote and retry."
+    ),
+    {"doc_id": str, "quote": str, "replacement": str, "reason": str},
+)
+async def propose_workspace_suggestion(args):
+    """Stage a single pending character-level suggestion (human approves/rejects)."""
+    from src.storage import db as _db
+    from src.workspace import suggestions as _svc
+    from src.workspace.anchor import AnchorNotFound
+
+    doc_id = args["doc_id"]
+    if not _db.get_workspace_document(doc_id):
+        return {"content": [{"type": "text", "text": f"Error: workspace document not found: {doc_id}"}]}
+
+    try:
+        s = _svc.create_pending(
+            document_id=doc_id,
+            quote=args["quote"],
+            new_content=args.get("replacement", ""),
+            created_by="agent",
+        )
+    except AnchorNotFound as e:
+        detail = (
+            f"could not anchor the quote ({e.reason}). "
+            "The 'quote' must be copied verbatim from the current document. "
+        )
+        if e.candidates:
+            detail += f"{len(e.candidates)} similar spots exist — add surrounding context and retry."
+        return {"content": [{"type": "text", "text": f"Suggestion not created: {detail}"}]}
+    except ValueError as e:
+        if str(e) == "PENDING_SUGGESTION_EXISTS":
+            return {"content": [{"type": "text", "text":
+                "Not created: this document already has a pending suggestion. "
+                "Wait for the human to accept or reject it before proposing another."}]}
+        return {"content": [{"type": "text", "text": f"Suggestion not created: {e}"}]}
+
+    reason = args.get("reason", "")
+    return {"content": [{"type": "text", "text":
+        f"Pending suggestion {s['id']} created for document {doc_id}. "
+        f"Reason: {reason}. The human will review and accept or reject it; "
+        f"the document is unchanged until then."}]}
+
+
 def build_knowledge_tools_server():
     """Create MCP server with all knowledge/wiki tools."""
     return create_sdk_mcp_server(
@@ -1332,6 +1385,7 @@ def build_knowledge_tools_server():
             query_database,
             read_workspace_document,
             list_workspace_documents_tool,
+            propose_workspace_suggestion,
         ],
     )
 
@@ -1400,6 +1454,7 @@ def build_agent_options(
             "mcp__pagefly__query_database",
             "mcp__pagefly__read_workspace_document",
             "mcp__pagefly__list_workspace_documents",
+            "mcp__pagefly__propose_workspace_suggestion",
         ],
         permission_mode="bypassPermissions",
         max_turns=max_turns,
