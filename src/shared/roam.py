@@ -143,7 +143,7 @@ def format_roam_message(items: list[dict], max_preview: int = 800) -> str:
         article_type = item.get("preview_type", item.get("category", ""))
         preview = item["preview"][:max_preview].rstrip()
         if len(item["preview"]) > max_preview:
-            preview += "\n\n_(full article in knowledge base)_"
+            preview += "...\n\n_(full article in knowledge base)_"
 
         lines.append(f"**{i}. {item['title']}**")
         if article_type:

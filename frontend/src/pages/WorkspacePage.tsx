@@ -43,6 +43,7 @@ import {
 } from 'lucide-react'
 import api from '@/api/client'
 import { cn } from '@/lib/utils'
+import { SuggestionBar, type PendingSuggestion } from '@/components/workspace/SuggestionBar'
 
 interface WsDoc {
   id: string
@@ -70,6 +71,17 @@ export function WorkspacePage() {
   const [chatInput, setChatInput] = useState('')
   const [chatLoading, setChatLoading] = useState(false)
   const chatEndRef = useRef<HTMLDivElement>(null)
+  const [pending, setPending] = useState<PendingSuggestion | null>(null)
+
+  const fetchPending = useCallback(async (docId: string) => {
+    try {
+      const { data } = await api.get(`/api/workspace/documents/${docId}/suggestions`)
+      setPending(data.pending || null)
+    } catch {
+      setPending(null)
+    }
+  }, [])
+
 
   const editor = useEditor({
     extensions: [
@@ -100,6 +112,19 @@ export function WorkspacePage() {
 
   useEffect(() => { fetchDocs() }, [fetchDocs])
 
+  const handleSuggestionResolved = useCallback(async (docId: string, action: 'accept' | 'reject') => {
+    setPending(null)
+    if (action === 'accept') {
+      // Accepted edits changed the document — reload content + revision.
+      try {
+        const { data } = await api.get(`/api/workspace/documents/${docId}`)
+        setSelected(data)
+        editor?.commands.setContent(data.content || '<p></p>')
+        fetchDocs()
+      } catch { /* keep current view */ }
+    }
+  }, [editor, fetchDocs])
+
   const selectDoc = useCallback(async (doc: WsDoc) => {
     // Save current doc before switching
     await handleSaveRef.current()
@@ -109,6 +134,7 @@ export function WorkspacePage() {
       setTitle(data.title)
       setError('')
       editor?.commands.setContent(data.content || '<p></p>')
+      fetchPending(data.id)
       // Load chat history from main shared session
       try {
         const { data: chatData } = await api.get('/api/chat/history')
@@ -117,7 +143,7 @@ export function WorkspacePage() {
     } catch {
       setError('Failed to load document')
     }
-  }, [editor])
+  }, [editor, fetchPending])
 
   const handleCreate = async () => {
     const name = prompt('Document title:')
@@ -129,6 +155,7 @@ export function WorkspacePage() {
       const { data: full } = await api.get(`/api/workspace/documents/${data.id}`)
       setSelected(full)
       setTitle(full.title)
+      setPending(null)
       editor?.commands.setContent('<p></p>')
     } catch { /* silent */ }
   }
@@ -206,6 +233,7 @@ export function WorkspacePage() {
     try {
       await api.post(`/api/workspace/documents/${selected.id}/ingest`)
       setSelected(null)
+      setPending(null)
       editor?.commands.setContent('')
       fetchDocs()
     } catch (e: unknown) {
@@ -220,6 +248,7 @@ export function WorkspacePage() {
       await api.delete(`/api/workspace/documents/${doc.id}`)
       if (selected?.id === doc.id) {
         setSelected(null)
+        setPending(null)
         editor?.commands.setContent('')
       }
       fetchDocs()
@@ -251,12 +280,14 @@ export function WorkspacePage() {
       const prefixedMsg = `[正在编辑 Workspace 文档: ${selected.id} "${selected.title}"]\n${msg}`
       const { data } = await api.post('/api/chat', { message: prefixedMsg })
       setChatMessages(data.messages || [])
+      // The agent may have staged a pending suggestion via its tool.
+      fetchPending(selected.id)
     } catch {
       setChatMessages((prev) => [...prev, { role: 'assistant', content: 'Error: failed to get response.' }])
     } finally {
       setChatLoading(false)
     }
-  }, [selected, chatInput, chatLoading])
+  }, [selected, chatInput, chatLoading, fetchPending])
 
   // Scroll chat to bottom on new messages, loading state change, or panel open
   useEffect(() => {
@@ -393,6 +424,15 @@ export function WorkspacePage() {
                   </button>
                 </div>
               </div>
+
+              {/* Pending AI suggestion */}
+              {pending && (
+                <SuggestionBar
+                  docId={selected.id}
+                  suggestion={pending}
+                  onResolved={(action) => handleSuggestionResolved(selected.id, action)}
+                />
+              )}
 
               {/* Toolbar */}
               {editor && (
