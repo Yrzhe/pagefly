@@ -43,6 +43,7 @@ _ALLOWED_TASK_COLUMNS = frozenset({
 _ALLOWED_WSDOC_COLUMNS = frozenset({
     "title",
     "content",
+    "content_md",
     "revision",
     "status",
     "updated_at",
@@ -192,6 +193,7 @@ CREATE TABLE IF NOT EXISTS workspace_documents (
     id TEXT PRIMARY KEY,
     title TEXT NOT NULL DEFAULT '',
     content TEXT NOT NULL DEFAULT '',
+    content_md TEXT NOT NULL DEFAULT '',
     revision INTEGER NOT NULL DEFAULT 1,
     status TEXT NOT NULL DEFAULT 'draft',
     created_by TEXT NOT NULL DEFAULT 'human',
@@ -295,6 +297,28 @@ def init_db() -> None:
         try:
             conn.execute("ALTER TABLE workspace_documents ADD COLUMN chat_json TEXT NOT NULL DEFAULT '[]'")
             logger.info("Migration: added chat_json column to workspace_documents")
+        except sqlite3.OperationalError:
+            pass
+
+    # Migration: add content_md (canonical markdown) + backfill from existing HTML
+    try:
+        conn.execute("SELECT content_md FROM workspace_documents LIMIT 1")
+    except sqlite3.OperationalError:
+        try:
+            conn.execute("ALTER TABLE workspace_documents ADD COLUMN content_md TEXT NOT NULL DEFAULT ''")
+            from src.shared.md import html_to_markdown
+            rows = conn.execute(
+                "SELECT id, content FROM workspace_documents WHERE content != ''"
+            ).fetchall()
+            for r in rows:
+                conn.execute(
+                    "UPDATE workspace_documents SET content_md = ? WHERE id = ?",
+                    (html_to_markdown(r["content"]), r["id"]),
+                )
+            logger.info(
+                "Migration: added content_md column to workspace_documents, backfilled %d rows",
+                len(rows),
+            )
         except sqlite3.OperationalError:
             pass
     conn.commit()
@@ -685,14 +709,17 @@ def insert_workspace_document(
     status: str = "draft",
     created_by: str = "human",
 ) -> None:
-    """Insert a new workspace document."""
+    """Insert a new workspace document. content is HTML; content_md is derived canonical markdown."""
+    from src.shared.md import html_to_markdown
+
     ts = now_iso()
+    content_md = html_to_markdown(content)
     conn = get_connection()
     try:
         conn.execute(
-            """INSERT INTO workspace_documents (id, title, content, revision, status, created_by, created_at, updated_at)
-            VALUES (?, ?, ?, 1, ?, ?, ?, ?)""",
-            (doc_id, title, content, status, created_by, ts, ts),
+            """INSERT INTO workspace_documents (id, title, content, content_md, revision, status, created_by, created_at, updated_at)
+            VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?)""",
+            (doc_id, title, content, content_md, status, created_by, ts, ts),
         )
         conn.commit()
     finally:
@@ -751,8 +778,11 @@ def update_workspace_document(doc_id: str, expected_revision: int | None = None,
                     f"Conflict: expected revision {expected_revision}, got {row['revision']}"
                 )
 
-        # Bump revision if content changed
+        # Bump revision if content changed; re-derive canonical markdown
         bump_rev = "content" in fields
+        if "content" in fields:
+            from src.shared.md import html_to_markdown
+            fields["content_md"] = html_to_markdown(fields["content"])
         fields["updated_at"] = now_iso()
         query, values = _build_update_sql("workspace_documents", _ALLOWED_WSDOC_COLUMNS, fields)
 

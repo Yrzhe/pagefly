@@ -35,8 +35,11 @@ frontend/dist/
 *.swp
 *.swo
 
-# Design files
+# Internal design/implementation docs — public repo; these live in Notion instead
 docs/design/
+docs/workspace/
+docs/implementation/
+docs/internal/
 
 # Playwright
 .playwright-mcp/
