@@ -1227,6 +1227,15 @@ async def create_workspace_suggestion_api(
     quote = (body.get("quote") or "").strip()
     if not quote:
         raise HTTPException(status_code=400, detail="quote required")
+    if len(quote) > 10_000:
+        raise HTTPException(status_code=400, detail="quote too long (max 10k chars)")
+    new_content = body.get("new_content") or ""
+    if len(new_content) > 50_000:
+        raise HTTPException(status_code=400, detail="new_content too long (max 50k chars)")
+    kind = body.get("kind", "replace")
+    if kind not in ("replace", "insert", "delete"):
+        raise HTTPException(status_code=400, detail="kind must be replace|insert|delete")
+    created_by = (body.get("created_by") or "agent")[:100]
     if not db.get_workspace_document(doc_id):
         raise HTTPException(status_code=404, detail="Document not found")
 
@@ -1234,11 +1243,11 @@ async def create_workspace_suggestion_api(
         return _svc.create_pending(
             document_id=doc_id,
             quote=quote,
-            new_content=body.get("new_content"),
-            created_by=body.get("created_by") or "agent",
+            new_content=new_content,
+            created_by=created_by,
             prefix=body.get("prefix"),
             suffix=body.get("suffix"),
-            kind=body.get("kind", "replace"),
+            kind=kind,
             idempotency_key=idempotency_key,
         )
     except AnchorNotFound as e:
@@ -1283,7 +1292,7 @@ async def resolve_workspace_suggestion_api(doc_id: str, sid: str, body: dict):
         _svc.resolve(
             sid,
             action=action,
-            resolved_by=body.get("resolved_by") or "human",
+            resolved_by=(body.get("resolved_by") or "human")[:100],
             rejection_reason=body.get("rejection_reason"),
         )
     except _svc.SuggestionDrifted as e:

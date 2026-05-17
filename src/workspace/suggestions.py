@@ -86,6 +86,8 @@ def resolve(
     sug = db.get_workspace_suggestion(suggestion_id)
     if not sug:
         raise ValueError("suggestion not found")
+    if sug["status"] != "pending":
+        raise ValueError(f"suggestion already resolved: {sug['status']}")
 
     if action != "accept":
         db.resolve_workspace_suggestion(

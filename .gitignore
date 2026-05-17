@@ -20,6 +20,8 @@ data/raw/*
 data/knowledge/*
 data/wiki/*
 data/inbox/*
+data/activity/*
+data/workspace/*
 !data/raw/.gitkeep
 !data/knowledge/.gitkeep
 !data/wiki/.gitkeep

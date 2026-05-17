@@ -114,6 +114,11 @@ export function WorkspacePage() {
 
   const handleSuggestionResolved = useCallback(async (docId: string, action: 'accept' | 'reject') => {
     setPending(null)
+    // Cancel pending auto-save to prevent stale revision writes
+    if (autoSaveTimer.current) {
+      clearTimeout(autoSaveTimer.current)
+      autoSaveTimer.current = null
+    }
     if (action === 'accept') {
       // Accepted edits changed the document — reload content + revision.
       try {
