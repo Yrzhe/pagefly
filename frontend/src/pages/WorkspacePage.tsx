@@ -71,14 +71,14 @@ export function WorkspacePage() {
   const [chatInput, setChatInput] = useState('')
   const [chatLoading, setChatLoading] = useState(false)
   const chatEndRef = useRef<HTMLDivElement>(null)
-  const [pending, setPending] = useState<PendingSuggestion | null>(null)
+  const [pending, setPending] = useState<PendingSuggestion[]>([])
 
   const fetchPending = useCallback(async (docId: string) => {
     try {
       const { data } = await api.get(`/api/workspace/documents/${docId}/suggestions`)
-      setPending(data.pending || null)
+      setPending(data.pending || [])
     } catch {
-      setPending(null)
+      setPending([])
     }
   }, [])
 
@@ -113,7 +113,7 @@ export function WorkspacePage() {
   useEffect(() => { fetchDocs() }, [fetchDocs])
 
   const handleSuggestionResolved = useCallback(async (docId: string, action: 'accept' | 'reject') => {
-    setPending(null)
+    setPending([])
     // Cancel pending auto-save to prevent stale revision writes
     if (autoSaveTimer.current) {
       clearTimeout(autoSaveTimer.current)
@@ -160,7 +160,7 @@ export function WorkspacePage() {
       const { data: full } = await api.get(`/api/workspace/documents/${data.id}`)
       setSelected(full)
       setTitle(full.title)
-      setPending(null)
+      setPending([])
       editor?.commands.setContent('<p></p>')
     } catch { /* silent */ }
   }
@@ -247,7 +247,7 @@ export function WorkspacePage() {
     try {
       await api.post(`/api/workspace/documents/${selected.id}/ingest`)
       setSelected(null)
-      setPending(null)
+      setPending([])
       editor?.commands.setContent('')
       fetchDocs()
     } catch (e: unknown) {
@@ -262,7 +262,7 @@ export function WorkspacePage() {
       await api.delete(`/api/workspace/documents/${doc.id}`)
       if (selected?.id === doc.id) {
         setSelected(null)
-        setPending(null)
+        setPending([])
         editor?.commands.setContent('')
       }
       fetchDocs()
@@ -439,11 +439,11 @@ export function WorkspacePage() {
                 </div>
               </div>
 
-              {/* Pending AI suggestion */}
-              {pending && (
+              {/* Pending AI suggestions */}
+              {pending.length > 0 && (
                 <SuggestionBar
                   docId={selected.id}
-                  suggestion={pending}
+                  suggestions={pending}
                   onResolved={(action) => handleSuggestionResolved(selected.id, action)}
                 />
               )}

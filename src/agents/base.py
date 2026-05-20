@@ -1300,9 +1300,9 @@ async def list_workspace_documents_tool(args):
     "propose_workspace_suggestion",
     (
         "PROPOSE a precise edit to a workspace document — do NOT claim you edited "
-        "it. You cannot change the document directly; this only stages one pending "
-        "suggestion that the human reviews and accepts or rejects. Only one pending "
-        "suggestion may exist per document at a time. Provide: doc_id; quote (the "
+        "it. You cannot change the document directly; this only stages a pending "
+        "suggestion that the human reviews and accepts or rejects. You can propose "
+        "multiple suggestions for the same document. Provide: doc_id; quote (the "
         "EXACT existing text to replace, copied verbatim from the document — read it "
         "first with read_workspace_document); replacement (the new text); reason "
         "(one short sentence the human will see). If the quote is ambiguous or not "
@@ -1336,10 +1336,6 @@ async def propose_workspace_suggestion(args):
             detail += f"{len(e.candidates)} similar spots exist — add surrounding context and retry."
         return {"content": [{"type": "text", "text": f"Suggestion not created: {detail}"}]}
     except ValueError as e:
-        if str(e) == "PENDING_SUGGESTION_EXISTS":
-            return {"content": [{"type": "text", "text":
-                "Not created: this document already has a pending suggestion. "
-                "Wait for the human to accept or reject it before proposing another."}]}
         return {"content": [{"type": "text", "text": f"Suggestion not created: {e}"}]}
 
     reason = args.get("reason", "")

@@ -103,7 +103,7 @@ When the user is editing a workspace document (you'll see a `[正在编辑 Works
    - `quote` must be EXACT text from the document (copy verbatim)
    - `replacement` is the new text to replace it with
    - `reason` is a short explanation shown to the user
-3. **One at a time**: Only one pending suggestion per document. Wait for the user to accept/reject before proposing another.
+3. **Multiple suggestions OK**: You can propose several edits in one turn — the user reviews them all.
 4. **Don't claim you edited it** — you only PROPOSE, the user decides.
 
 If the user asks you to "改一下" / "帮我精简" / "improve this" / "rewrite":

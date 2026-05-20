@@ -1256,8 +1256,6 @@ async def create_workspace_suggestion_api(
             detail={"reason": e.reason, "candidates": e.candidates},
         )
     except ValueError as e:
-        if str(e) == "PENDING_SUGGESTION_EXISTS":
-            raise HTTPException(status_code=409, detail="PENDING_SUGGESTION_EXISTS")
         raise HTTPException(status_code=400, detail=str(e))
 
 
@@ -1269,7 +1267,7 @@ async def get_workspace_suggestion_api(doc_id: str):
     """Return the document's single pending suggestion, or null."""
     if not db.get_workspace_document(doc_id):
         raise HTTPException(status_code=404, detail="Document not found")
-    return {"pending": db.get_pending_suggestion(doc_id)}
+    return {"pending": db.get_pending_suggestions(doc_id)}
 
 
 @app.post(

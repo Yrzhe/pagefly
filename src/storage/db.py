@@ -221,8 +221,6 @@ CREATE TABLE IF NOT EXISTS workspace_suggestions (
     idempotency_key TEXT,
     created_at TEXT NOT NULL
 );
-CREATE UNIQUE INDEX IF NOT EXISTS ws_suggestions_one_pending_per_doc
-    ON workspace_suggestions(document_id) WHERE status = 'pending';
 CREATE INDEX IF NOT EXISTS ws_suggestions_status_idx
     ON workspace_suggestions(document_id, status);
 -- ws_suggestions_idempotency_key index is created in the migration block, not
@@ -365,6 +363,11 @@ def init_db() -> None:
             "CREATE UNIQUE INDEX IF NOT EXISTS ws_suggestions_idempotency_key "
             "ON workspace_suggestions(idempotency_key) WHERE idempotency_key IS NOT NULL"
         )
+    except sqlite3.OperationalError:
+        pass
+    # Migration: drop the old one-pending-per-doc constraint (now allow multiple)
+    try:
+        conn.execute("DROP INDEX IF EXISTS ws_suggestions_one_pending_per_doc")
     except sqlite3.OperationalError:
         pass
     conn.commit()
@@ -875,8 +878,7 @@ def create_workspace_suggestion(
     new_content: str | None = None,
     idempotency_key: str | None = None,
 ) -> str:
-    """Create a pending suggestion. Raises ValueError('PENDING_SUGGESTION_EXISTS')
-    if the document already has one (enforced by a partial unique index)."""
+    """Create a pending suggestion. Multiple pending suggestions per document are allowed."""
     import uuid as _uuid
 
     sid = str(_uuid.uuid4())
@@ -896,7 +898,7 @@ def create_workspace_suggestion(
     except sqlite3.IntegrityError as e:
         if idempotency_key and "idempotency" in str(e).lower():
             raise ValueError("IDEMPOTENCY_REPLAY") from e
-        raise ValueError("PENDING_SUGGESTION_EXISTS") from e
+        raise
     finally:
         conn.close()
 
@@ -914,15 +916,15 @@ def get_suggestion_by_idempotency_key(idempotency_key: str) -> dict | None:
         conn.close()
 
 
-def get_pending_suggestion(document_id: str) -> dict | None:
-    """The single pending suggestion for a document, or None."""
+def get_pending_suggestions(document_id: str) -> list[dict]:
+    """All pending suggestions for a document, ordered by creation time."""
     conn = get_connection()
     try:
-        row = conn.execute(
-            "SELECT * FROM workspace_suggestions WHERE document_id = ? AND status = 'pending'",
+        rows = conn.execute(
+            "SELECT * FROM workspace_suggestions WHERE document_id = ? AND status = 'pending' ORDER BY created_at",
             (document_id,),
-        ).fetchone()
-        return dict(row) if row else None
+        ).fetchall()
+        return [dict(r) for r in rows]
     finally:
         conn.close()
 

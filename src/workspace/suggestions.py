@@ -1,10 +1,10 @@
 """Suggestion service: anchor resolution + storage + markdown apply.
 
-One pending suggestion per document (enforced in the storage layer). On accept
+Multiple pending suggestions per document are supported. On accept
 the anchor is RE-resolved against the document's current canonical markdown so
 an unrelated human edit that shifted offsets is handled, and a human edit that
 removed the anchored text is refused as drift (the document is never mutated at
-a wrong location). See docs/workspace spec §3a (drift) and §2.5 (single-pending).
+a wrong location). See docs/workspace spec §3a (drift).
 """
 
 from __future__ import annotations
@@ -31,8 +31,7 @@ def create_pending(
 ) -> dict:
     """Resolve the quote against canonical markdown and store a pending row.
 
-    Raises AnchorNotFound if the quote does not resolve uniquely,
-    ValueError('PENDING_SUGGESTION_EXISTS') if the doc already has one.
+    Raises AnchorNotFound if the quote does not resolve uniquely.
     If idempotency_key replays a prior create, the original row is returned.
     """
     if idempotency_key:
