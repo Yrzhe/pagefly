@@ -181,8 +181,17 @@ export function WorkspacePage() {
       setSelected((prev) => prev ? { ...prev, revision: data.revision, title, content: html } : prev)
       fetchDocs()
     } catch (e: unknown) {
-      const err = e as { response?: { data?: { detail?: string } } }
-      setError(err.response?.data?.detail || 'Save failed')
+      const err = e as { response?: { status?: number; data?: { detail?: string } } }
+      // On revision conflict (409), silently refresh to latest revision
+      if (err.response?.status === 409) {
+        try {
+          const { data: fresh } = await api.get(`/api/workspace/documents/${selected.id}`)
+          setSelected(fresh)
+          // Don't overwrite editor content — user might be typing
+        } catch { /* ignore */ }
+      } else {
+        setError(err.response?.data?.detail || 'Save failed')
+      }
     } finally {
       setSaving(false)
     }
@@ -514,18 +523,23 @@ export function WorkspacePage() {
                           <p className="text-[10px] text-text-tertiary mt-1">e.g. "Improve the introduction" or "What's missing?"</p>
                         </div>
                       )}
-                      {chatMessages.map((m, i) => (
-                        <div key={i} className={cn('max-w-[95%] text-xs leading-relaxed min-w-0', m.role === 'user' ? 'ml-auto' : 'mr-auto')}>
-                          <div className={cn(
-                            'px-3 py-2 rounded-lg whitespace-pre-wrap break-words overflow-hidden',
-                            m.role === 'user'
-                              ? 'bg-accent-primary/10 text-text-primary rounded-br-sm'
-                              : 'bg-bg-secondary text-text-primary rounded-bl-sm'
-                          )}>
-                            {m.content}
+                      {chatMessages.map((m, i) => {
+                        // Strip workspace context prefix from display
+                        const displayContent = m.content.replace(/^\[正在编辑 Workspace 文档:.*?\]\n?/g, '')
+                        if (!displayContent.trim()) return null
+                        return (
+                          <div key={i} className={cn('max-w-[95%] text-xs leading-relaxed min-w-0', m.role === 'user' ? 'ml-auto' : 'mr-auto')}>
+                            <div className={cn(
+                              'px-3 py-2 rounded-lg whitespace-pre-wrap break-words overflow-hidden chat-md',
+                              m.role === 'user'
+                                ? 'bg-accent-primary/10 text-text-primary rounded-br-sm'
+                                : 'bg-bg-secondary text-text-primary rounded-bl-sm'
+                            )}
+                              dangerouslySetInnerHTML={{ __html: renderChatMarkdown(displayContent) }}
+                            />
                           </div>
-                        </div>
-                      ))}
+                        )
+                      })}
                       {chatLoading && (
                         <div className="flex items-center gap-2 text-xs text-text-tertiary mr-auto">
                           <Loader2 size={12} className="animate-spin" />
@@ -589,6 +603,22 @@ function StatusBadgeColored({ status }: { status: string }) {
     </span>
   )
 }
+
+/* ── Chat markdown renderer (lightweight) ── */
+
+function renderChatMarkdown(text: string): string {
+  return text
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+    .replace(/`([^`]+)`/g, '<code style="background:#FDF6E3;padding:1px 4px;border-radius:3px;font-size:11px">$1</code>')
+    .replace(/^### (.+)$/gm, '<div style="font-weight:600;margin:8px 0 4px">$1</div>')
+    .replace(/^## (.+)$/gm, '<div style="font-weight:700;margin:8px 0 4px">$1</div>')
+    .replace(/^→ /gm, '→ ')
+    .replace(/\n/g, '<br>')
+}
+
+/* ── Small components ── */
 
 function TBtn({ onClick, active, disabled, icon, title }: {
   onClick: () => void; active?: boolean; disabled?: boolean; icon: React.ReactNode; title: string
