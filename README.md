@@ -1,3 +1,5 @@
+
+
 <div align="center">
 
 <img src="docs/assets/readme/OG Image.png" alt="PageFly — Personal Knowledge OS" width="720" />
@@ -105,7 +107,7 @@ I saw the tweet and thought: what if we took this further? Not just a wiki, but 
 ```bash
 git clone https://github.com/Yrzhe/pagefly.git
 cd pagefly
-python -m src.cli setup      # interactive: email, password, API keys, demo data
+python -m src.cli setup      # interactive: email, password, API keys
 docker compose up -d
 ```
 
@@ -213,7 +215,7 @@ Open PageflyCapture → menu bar icon → Preferences → enter server URL + API
 
 ### AI Models
 | Task | Model |
-|------|-------|
+|------|------|
 | Classification & Agents | Claude (Anthropic) |
 | Voice Transcription | gpt-4o-transcribe (OpenAI) |
 | Image OCR | mistral-ocr-latest + mistral-small-latest |
